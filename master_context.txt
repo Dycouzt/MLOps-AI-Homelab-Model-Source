@@ -1,183 +1,89 @@
-# ============================================================
-# Project: AI-Powered Self-Healing DevSecOps Homelab
-# ============================================================
+# Project Master Context: AI-Augmented, Self-Healing MLOps Platform
 
-## 1. Project Overview
-This project demonstrates a fully integrated, on-premises DevSecOps homelab
-that combines **secure CI/CD pipelines, Kubernetes orchestration, monitoring,
-security scanning, chaos engineering, and AI integration**.
+## 1. Project Vision & Core Purpose
 
-The goal is to showcase:
-- Cloud-agnostic deployments (runs fully on local infrastructure).
-- Automated DevSecOps practices (shift-left security).
-- AI-assisted workflows for:
-  - Explaining pipeline failures.
-  - Generating security/compliance policies.
-  - Summarizing incidents and creating post-mortems.
-- Self-healing infrastructure with automated remediation.
+The primary vision is to build a fully automated, on-premises MLOps platform that manages the entire lifecycle of a machine learning model, from code commit to production deployment and monitoring.
 
-This project is designed to be **portfolio-ready** for DevOps/DevSecOps/SRE roles.
+The project's unique differentiator is its "AI-Augmented" operational layer. Instead of just serving models, the platform uses a Large Language Model (LLM) via the Gemini CLI to perform intelligent root cause analysis on production alerts, transforming raw monitoring data into actionable insights for the human operator. This demonstrates a forward-thinking approach to AIOps (AI for IT Operations) within an MLOps context.
 
----
+This project serves as a portfolio centerpiece to showcase advanced, practical skills in Platform Engineering, MLOps, DevSecOps, and applied AI.
 
-## 2. Core Features
-- Secure CI/CD pipeline:
-  - Build → Scan → Deploy → Monitor.
-  - Integrated vulnerability scanning with **Trivy**.
-- Kubernetes orchestration using **k3s** (lightweight k8s).
-- GitOps-based deployments with **ArgoCD**.
-- Security monitoring:
-  - **Falco** for runtime threats.
-  - **OPA/Gatekeeper** for compliance policies.
-- Monitoring & Observability:
-  - **Prometheus** + **Grafana** for metrics and dashboards.
-  - **Loki** for log aggregation.
-- Chaos Engineering:
-  - **Chaos Mesh** for controlled failures.
-- AI Agent (Gemini CLI or local LLM via Ollama):
-  - Log summarization and root cause analysis.
-  - Auto-generation of OPA policies from natural language.
-  - Incident report automation.
+## 2. Key Objectives & Showcase Goals
 
----
+This project is designed to demonstrate the following key competencies to potential employers:
 
-## 3. Architecture (High-Level)
+- **Full-Stack Infrastructure Management:** Proficiency in building a platform from the ground up, starting with virtualization (Proxmox) and bare-metal Kubernetes cluster deployment.
+- **Cloud-Native & Orchestration Mastery:** Deep, practical knowledge of Kubernetes as a portable, cloud-agnostic orchestration platform.
+- **Modern DevOps Best Practices:** Strict adherence to GitOps principles using ArgoCD as the single source of truth for the cluster's state.
+- **Advanced CI/CT/CD Pipeline Engineering:** The ability to design and implement a sophisticated pipeline that handles the unique requirements of ML models, including Continuous Training (CT) and validation.
+- **Integrated Security (DevSecOps):** Security is not an afterthought. The pipeline MUST include automated SAST, SCA, and container vulnerability scanning at every stage.
+- **ML Lifecycle Management:** Understanding of the tools (MLflow, KServe) and processes required to version, deploy, and serve ML models effectively.
+- **Pioneering AIOps Integration:** The innovative use of a generative AI (Gemini) to augment platform monitoring and reduce the cognitive load of on-call engineers.
 
-[Developer] --> [Git Repo] --> [CI/CD Pipeline]
-                                |
-                                v
-                     [Kubernetes Cluster (k3s)]
-                                |
-            ------------------------------------------------
-            |               |                |             |
-        [Monitoring]   [Security Scans]   [AI Agent]   [Chaos Tests]
-   (Prometheus/Loki)  (Trivy, Falco, OPA)  (Gemini/Ollama) (Chaos Mesh)
+## 3. Core Architecture & End-to-End Workflow
 
----
+The platform operates in three distinct phases:
 
-## 4. Tool Selection & Alternatives
+### Phase 1: The Platform Foundation (On-Premises Kubernetes Cluster)
+1.  **Virtualization Layer:** A single physical machine (homelab server) runs Proxmox VE as the hypervisor.
+2.  **VM Provisioning:** Proxmox hosts 3-4 lightweight Linux Virtual Machines which will serve as the nodes for the Kubernetes cluster.
+3.  **Kubernetes Bootstrap:** A Kubernetes cluster is installed and configured across the VMs using a distribution like K3s (for simplicity and low resource usage) or `kubeadm` (for a full-featured experience).
+4.  **GitOps Controller:** ArgoCD is installed into the Kubernetes cluster. It is configured to monitor a dedicated Git repository (the "infra-manifests" repo). ALL subsequent platform components are deployed and managed by ArgoCD.
 
-### CI/CD:
-- Primary: **GitHub Actions** with self-hosted runner.
-- Alternatives: GitLab CE (includes registry & CI/CD), Jenkins.
+### Phase 2: The MLOps CI/CT/CD Pipeline (GitHub Actions)
+1.  **Trigger:** A "Data Scientist" persona pushes new model source code, a test dataset, and a `Dockerfile` to a specific GitHub repository (the "model-source" repo).
+2.  **Continuous Integration (CI):**
+    -   Code quality checks (Flake8) and unit tests (Pytest) are executed.
+    -   Security scans are performed: SAST (Bandit), SCA (Snyk), and Secrets Detection (Gitleaks).
+3.  **Continuous Training (CT):**
+    -   The pipeline executes the model training script.
+    -   The trained model is evaluated against a test dataset. If its accuracy score is below a predefined threshold, the pipeline fails.
+    -   The validated model artifact and its performance metrics are versioned and logged in the MLflow server running on the cluster.
+4.  **Containerization & Security:**
+    -   A container image is built using the `Dockerfile`.
+    -   The container image is scanned for OS and library vulnerabilities using Trivy. The pipeline fails if critical vulnerabilities are found.
+    -   The clean image is pushed to a container registry (e.g., Docker Hub, GitHub Container Registry).
+5.  **Continuous Deployment (CD) via GitOps Handoff:**
+    -   The final step of the GitHub Actions workflow does NOT deploy directly to Kubernetes.
+    -   Instead, it automatically makes a commit to the "infra-manifests" repo, updating the Kubernetes deployment manifest to point to the new container image tag.
+    -   ArgoCD detects this change in the manifest repo and automatically synchronizes the cluster, rolling out the new model version using the KServe model server.
 
-### Kubernetes:
-- Primary: **k3s** (lightweight).
-- Alternatives: kind, minikube.
+### Phase 3: The AI-Augmented Monitoring Loop
+1.  **Alert Condition:** The Prometheus monitoring stack detects an anomaly (e.g., model inference latency exceeds 500ms).
+2.  **Alert Firing:** Prometheus sends an alert to Alertmanager.
+3.  **Webhook Trigger:** Alertmanager is configured to fire a webhook to a trigger URL (e.g., a GitHub Actions `workflow_dispatch` endpoint). The webhook payload contains the full JSON context of the alert.
+4.  **AI Analyst Workflow (GitHub Actions):**
+    -   The workflow is triggered by the webhook and parses the alert JSON.
+    -   It uses `kubectl` with cluster credentials to fetch the logs from the specific pod identified in the alert.
+    -   It invokes the Gemini CLI (`gcloud alpha gemini chat`) with a structured prompt containing the alert data and the fetched logs.
+    -   **Prompt Template:** "You are an expert MLOps SRE. A high-latency alert has been triggered for a model serving pod. Based on the following alert data and pod logs, provide a brief markdown report with the 3 most likely root causes and a specific, actionable remediation step for each."
+5.  **Intelligent Reporting:** The markdown-formatted analysis from Gemini is then posted to a Slack channel or used to create a new GitHub Issue, providing the on-call engineer with immediate, intelligent context.
 
-### GitOps:
-- Primary: **ArgoCD**.
-- Alternative: FluxCD.
+## 4. Technology Stack
 
-### Monitoring & Logging:
-- **Prometheus** (metrics).
-- **Grafana** (dashboards).
-- **Loki** (logs).
-- Alternatives: ELK stack (ElasticSearch, Logstash, Kibana).
+- **Hypervisor:** Proxmox VE
+- **Orchestration:** Kubernetes (K3s or kubeadm)
+- **CI/CD & Automation:** GitHub Actions
+- **GitOps Controller:** ArgoCD
+- **Containerization:** Docker / Buildx
+- **MLOps Tooling:**
+    -   **Model Registry:** MLflow
+    -   **Model Serving:** KServe (or Seldon Core)
+- **DevSecOps Tooling:**
+    -   **SAST:** Bandit
+    -   **SCA:** Snyk
+    -   **Secrets:** Gitleaks
+    -   **Container Scanning:** Trivy
+- **Monitoring & Alerting:**
+    -   **Metrics:** Prometheus
+    -   **Dashboards:** Grafana
+    -   **Alerting:** Alertmanager
+- **AI Integration:** Google Cloud CLI with Gemini (`gcloud alpha gemini chat`)
 
-### Security:
-- **Trivy** (image scans).
-- **Falco** (runtime).
-- **OPA/Gatekeeper** (policies).
-- Alternatives: Clair, Kyverno.
+## 5. Guiding Principles
 
-### Chaos Engineering:
-- **Chaos Mesh**.
-- Alternative: LitmusChaos.
-
-### AI Integration:
-- Primary: **Gemini CLI** (API-based).
-- Alternative: **Ollama** with local models (Mistral 7B, Code Llama).
-- Orchestration (optional): **LangChain**.
-
----
-
-## 5. Hardware & Specs
-
-### Tested System (Baseline):
-- Device: MacBook Air M2 (16GB RAM).
-- Specs: 8 cores (4 performance, 4 efficiency), 16GB unified memory, fast SSD.
-- OS: macOS + Colima/OrbStack (for Docker ARM64 support).
-
-### Observations:
-- Runs full stack, but resource balancing is necessary.
-- Not ideal for running ALL components simultaneously (may require selective enable/disable).
-
-### Recommended Minimum Specs for Smooth Homelab:
-- CPU: 4 cores (ARM or x86).
-- RAM: 16GB (32GB preferred for full stack running at once).
-- Storage: 256GB+ SSD.
-- Network: Stable LAN/Wi-Fi.
-
-### Alternative Hardware Solutions:
-- **Mini PC (Intel NUC/AMD MiniPC)** with 32GB+ RAM → supports Proxmox and multiple VMs.
-- **Raspberry Pi Cluster (ARM64)** for distributed homelab.
-- **Old workstation/server** repurposed as homelab node.
-
----
-
-## 6. Deployment Strategy (Phased)
-
-### Phase 1: Core Pipeline
-- Build and push container image.
-- Scan with Trivy.
-- Deploy to k3s via ArgoCD.
-
-### Phase 2: Monitoring
-- Add Prometheus, Grafana, Loki.
-- Integrate logs with AI log analyzer.
-
-### Phase 3: Security
-- Add Falco + OPA policies.
-- AI-generated compliance rules.
-
-### Phase 4: Self-Healing Infra
-- Prometheus alerts → automated remediation (restart pods, rollback).
-- AI-generated incident explanations.
-
-### Phase 5: Chaos Engineering
-- Deploy Chaos Mesh.
-- Run experiments → AI generates post-mortems.
-
----
-
-## 7. Repo Structure
-
-devsecops-homelab/
-├── ci-cd/                   # GitHub Actions or GitLab CI configs
-│   └── pipeline.yml
-├── k8s-manifests/           # Kubernetes YAMLs
-│   ├── app/
-│   ├── monitoring/          # Prometheus, Grafana, Loki
-│   ├── security/            # Falco, OPA
-│   └── chaos/               # Chaos Mesh experiments
-├── ai-agent/                # AI integration scripts
-│   ├── log_analyzer.py
-│   ├── policy_generator.py
-│   └── incident_reporter.py
-├── app/                     # Sample microservice app
-├── docs/                    # Documentation + diagrams
-└── README.md
-
----
-
-## 8. Portfolio Demonstration Checklist
-- [ ] Run CI/CD pipeline (build → scan → deploy).
-- [ ] Show Trivy detecting vulnerabilities.
-- [ ] Deploy app into k3s via ArgoCD.
-- [ ] Display Grafana dashboards with app metrics.
-- [ ] Capture Falco detecting runtime anomalies.
-- [ ] AI agent explains a failed pipeline.
-- [ ] AI generates an OPA policy.
-- [ ] Run Chaos Mesh experiment → AI creates incident report.
-- [ ] Record short demo video (2–3 min).
-- [ ] Document architecture diagram + workflow.
-
----
-
-## 9. Key Value for Recruiters
-- Demonstrates **cloud-agnostic DevSecOps expertise**.
-- Shows ability to integrate **AI into modern DevOps workflows**.
-- Proves skills in **automation, observability, resilience, and security**.
-- Balanced: technical depth + forward-looking innovation.
-
+- **Infrastructure as Code (IaC):** All infrastructure and platform configuration MUST be defined declaratively in code and stored in Git.
+- **GitOps is the Source of Truth:** The state of the Kubernetes cluster MUST reflect the state of the main branch of the manifests repository. No manual `kubectl apply` commands.
+- **Automation First:** Every repetitive task, from testing to deployment and analysis, should be automated.
+- **Immutable Infrastructure:** Containers are treated as immutable artifacts. To change a running application, a new image is built and deployed.
+- **Security is Shift-Left:** Security checks are integrated into the earliest possible stages of the pipeline.
