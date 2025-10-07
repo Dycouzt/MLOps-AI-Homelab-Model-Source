@@ -4,7 +4,7 @@
 
 The primary vision is to build a fully automated, on-premises MLOps platform that manages the entire lifecycle of a machine learning model, from code commit to production deployment and monitoring.
 
-The project's unique differentiator is its "AI-Augmented" operational layer. Instead of just serving models, the platform uses a Large Language Model (LLM) via the Gemini CLI to perform intelligent root cause analysis on production alerts, transforming raw monitoring data into actionable insights for the human operator. This demonstrates a forward-thinking approach to AIOps (AI for IT Operations) within an MLOps context.
+The project's unique differentiator is its "AI-Augmented" operational layer. Instead of just serving models, the platform uses a Large Language Model (LLM) via the Gemini CLI to perform intelligent operations across multiple critical domains: real-time log analysis, model drift detection, and CI/CD pipeline failure triage. This transforms raw operational data into actionable insights, reducing Mean Time To Resolution (MTTR) and cognitive load for human operators. This demonstrates a forward-thinking approach to AIOps (AI for IT Operations) within an MLOps context.
 
 This project serves as a portfolio centerpiece to showcase advanced, practical skills in Platform Engineering, MLOps, DevSecOps, and applied AI.
 
@@ -18,11 +18,16 @@ This project is designed to demonstrate the following key competencies to potent
 - **Advanced CI/CT/CD Pipeline Engineering:** The ability to design and implement a sophisticated pipeline that handles the unique requirements of ML models, including Continuous Training (CT) and validation.
 - **Integrated Security (DevSecOps):** Security is not an afterthought. The pipeline MUST include automated SAST, SCA, and container vulnerability scanning at every stage.
 - **ML Lifecycle Management:** Understanding of the tools (MLflow, KServe) and processes required to version, deploy, and serve ML models effectively.
-- **Pioneering AIOps Integration:** The innovative use of a generative AI (Gemini) to augment platform monitoring and reduce the cognitive load of on-call engineers.
+- **Pioneering AIOps Integration:** 
+  - The innovative use of generative AI (Gemini) to augment platform operations across multiple domains:
+    - **Observability:** Intelligent log analysis and alert contextualization
+    - **ML Operations:** Automated drift detection and model health diagnostics
+    - **Developer Experience:** CI/CD failure triage with actionable remediation steps
+  - Demonstrates the practical application of LLMs to reduce MTTR, improve model reliability, and accelerate developer feedback loops
 
 ## 3. Core Architecture & End-to-End Workflow
 
-The platform operates in three distinct phases:
+The platform operates in four distinct phases:
 
 ### Phase 1: The Platform Foundation (On-Premises Kubernetes Cluster)
 1.  **Virtualization Layer:** A single physical machine (homelab server) runs Proxmox VE as the hypervisor.
@@ -47,8 +52,13 @@ The platform operates in three distinct phases:
     -   The final step of the GitHub Actions workflow does NOT deploy directly to Kubernetes.
     -   Instead, it automatically makes a commit to the "infra-manifests" repo, updating the Kubernetes deployment manifest to point to the new container image tag.
     -   ArgoCD detects this change in the manifest repo and automatically synchronizes the cluster, rolling out the new model version using the KServe model server.
+6.  **AI-Augmented Failure Handling:**
+    -   If ANY step in the pipeline fails, an automated triage workflow is triggered.
+    -   The triage workflow invokes Gemini with failure-specific context (logs, error messages, scan results).
+    -   AI-generated analysis is posted as a commit comment or GitHub Issue.
+    -   Developers receive immediate, expert-level guidance without manual log analysis.
 
-### Phase 3: The AI-Augmented Monitoring Loop
+### Phase 3: The AI-Augmented Monitoring Loop (Real-Time Log Analysis)
 1.  **Alert Condition:** The Prometheus monitoring stack detects an anomaly (e.g., model inference latency exceeds 500ms).
 2.  **Alert Firing:** Prometheus sends an alert to Alertmanager.
 3.  **Webhook Trigger:** Alertmanager is configured to fire a webhook to a trigger URL (e.g., a GitHub Actions `workflow_dispatch` endpoint). The webhook payload contains the full JSON context of the alert.
@@ -58,6 +68,58 @@ The platform operates in three distinct phases:
     -   It invokes the Gemini CLI (`gcloud alpha gemini chat`) with a structured prompt containing the alert data and the fetched logs.
     -   **Prompt Template:** "You are an expert MLOps SRE. A high-latency alert has been triggered for a model serving pod. Based on the following alert data and pod logs, provide a brief markdown report with the 3 most likely root causes and a specific, actionable remediation step for each."
 5.  **Intelligent Reporting:** The markdown-formatted analysis from Gemini is then posted to a Slack channel or used to create a new GitHub Issue, providing the on-call engineer with immediate, intelligent context.
+
+### Phase 4: Enhanced AI-Augmented Intelligence Layer
+
+Beyond real-time log analysis, the platform leverages Gemini AI for two additional critical operational domains:
+
+#### AI-Powered Model Drift Detection & Analysis
+1. **Trigger Condition:** Prometheus detects model performance degradation:
+   - Accuracy drops below defined threshold (e.g., <85%)
+   - Prediction distribution shift detected
+   - Increased prediction confidence variance
+2. **Automated Context Gathering:**
+   - Fetch current model metrics from MLflow (accuracy, precision, recall, F1)
+   - Retrieve historical performance baselines (last 7, 14, 30 days)
+   - Pull feature importance statistics from the current model version
+   - Gather inference request metadata (payload distributions, timestamp patterns)
+3. **AI Drift Analysis Workflow (GitHub Actions):**
+   - Alertmanager webhook triggers a dedicated `drift-analysis.yml` workflow
+   - The workflow aggregates all metrics and constructs a structured prompt
+   - **Prompt Template:** "You are an expert ML model monitoring specialist. A production model is experiencing performance degradation. Based on the following metrics comparison [baseline vs current], feature distributions, and temporal patterns, provide: (1) Root cause hypothesis (data drift, concept drift, or model decay), (2) Affected features or data segments, (3) Recommended remediation (retrain, rollback, or feature engineering), (4) Urgency level (P0-P2)."
+   - Gemini returns a structured markdown analysis
+4. **Intelligent Response Actions:**
+   - **High-Confidence Drift (P0):** Automatically trigger a retraining pipeline with updated data
+   - **Medium-Confidence (P1):** Create a GitHub Issue with analysis and tag the ML team
+   - **Low-Confidence (P2):** Post analysis to Slack with "investigate" recommendation
+   - All actions include the AI-generated hypothesis and supporting metrics
+
+#### AI-Powered Pipeline Failure Triage
+1. **Trigger Condition:** Any GitHub Actions workflow failure in the model-source repository:
+   - CI stage failures (linting, testing)
+   - Security scan failures (SAST, SCA, secrets, container scanning)
+   - Training failures (model validation below threshold)
+   - Deployment failures (manifest validation, ArgoCD sync errors)
+2. **Automated Context Gathering:**
+   - Parse the GitHub Actions workflow run logs
+   - Extract the specific failing step and error messages
+   - Collect relevant file contents if the failure is code-related (e.g., the file flagged by Bandit)
+   - Retrieve the last successful run's configuration for comparison
+3. **AI Triage Workflow (GitHub Actions):**
+   - A `on: workflow_run` trigger activates when any workflow completes with `conclusion: failure`
+   - The triage workflow fetches all failure context via GitHub API
+   - **Prompt Template (varies by failure type):**
+     - **Security Scan Failure:** "You are a DevSecOps specialist. A [SAST/SCA/Container] security scan has failed with the following findings: [scan output]. For each finding: (1) Explain the vulnerability in simple terms, (2) Assess actual risk in this ML context, (3) Provide specific code fix with line numbers, (4) Indicate if it's a false positive."
+     - **Test Failure:** "You are a Python testing expert. Unit tests failed with: [pytest output]. Analyze: (1) Root cause of failure, (2) Whether it's a code bug or test issue, (3) Specific fix for the failing test/code."
+     - **Model Validation Failure:** "You are an ML engineer. Model training completed but accuracy is [X]%, below threshold [Y]%. Based on training logs: [logs], suggest: (1) Likely causes (data quality, hyperparameters, overfitting), (2) Top 3 specific actions to improve performance."
+   - Gemini returns a detailed, actionable triage report
+4. **Automated Developer Feedback:**
+   - Post the AI analysis as a comment directly on the failing commit or PR
+   - Create a detailed GitHub Issue if the failure is in the main branch
+   - Send a Slack notification with summary + link to full analysis
+   - Tag relevant team members based on failure type (security team for CVEs, ML team for validation failures)
+
+**Key Design Principle:** The AI does NOT auto-fix code or auto-merge changes. It accelerates human decision-making by providing expert-level analysis and specific, actionable recommendations. The human developer remains in control of all remediation actions.
 
 ## 4. Technology Stack
 
@@ -79,6 +141,11 @@ The platform operates in three distinct phases:
     -   **Dashboards:** Grafana
     -   **Alerting:** Alertmanager
 - **AI Integration:** Google Cloud CLI with Gemini (`gcloud alpha gemini chat`)
+    - **Use Cases:**
+      - Real-time log analysis for production alerts
+      - Model drift detection and root cause hypothesis
+      - CI/CD pipeline failure triage and remediation guidance
+      - Automated incident report generation
 
 ## 5. Guiding Principles
 
@@ -87,3 +154,4 @@ The platform operates in three distinct phases:
 - **Automation First:** Every repetitive task, from testing to deployment and analysis, should be automated.
 - **Immutable Infrastructure:** Containers are treated as immutable artifacts. To change a running application, a new image is built and deployed.
 - **Security is Shift-Left:** Security checks are integrated into the earliest possible stages of the pipeline.
+- **AI as Augmentation, Not Replacement:** AI-powered workflows provide expert-level analysis and recommendations, but humans remain in control of all critical decisions and remediation actions.
