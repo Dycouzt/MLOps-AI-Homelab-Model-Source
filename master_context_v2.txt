@@ -1,123 +1,64 @@
 # Project Master Context: AI-Augmented, Self-Healing MLOps Platform
+## Hybrid Cloud-Edge Architecture
 
 ## 1. Project Vision & Core Purpose
 
-The primary vision is to build a fully automated, on-premises MLOps platform that manages the entire lifecycle of a machine learning model, from code commit to production deployment and monitoring.
+The primary vision is to build a fully automated, hybrid MLOps platform that manages the entire lifecycle of a machine learning model, from code commit to production deployment and monitoring.
 
-The project's unique differentiator is its "AI-Augmented" operational layer. Instead of just serving models, the platform uses a Large Language Model (LLM) via the Gemini CLI to perform intelligent operations across multiple domains:
-- **Real-time log analysis** on production alerts
-- **Model drift detection** and root cause hypothesis generation
-- **CI/CD pipeline failure triage** with actionable remediation guidance
+The project's unique differentiator is its **multi-domain AI-Augmented operational layer**. The platform uses Google's Gemini LLM to perform intelligent:
+- Real-time log analysis and root cause diagnosis
+- Model drift detection and remediation recommendations
+- CI/CD pipeline failure triage with actionable fixes
 
-This transforms raw monitoring data and failure logs into actionable insights for the human operator, demonstrating a forward-thinking approach to AIOps (AI for IT Operations) within an MLOps context.
+This demonstrates a forward-thinking approach to AIOps (AI for IT Operations) within an MLOps context, showcasing how AI can reduce MTTR, improve reliability, and accelerate development velocity.
 
-This project serves as a portfolio centerpiece to showcase advanced, practical skills in Platform Engineering, MLOps, DevSecOps, and applied AI.
+**Architecture Philosophy:** This platform demonstrates cloud-agnostic hybrid architecture principles. The control plane runs on GCP (chosen for its Kubernetes heritage and Gemini integration), while the data plane runs on-premises. All infrastructure is defined in portable Kubernetes manifests, making the platform migratable to AWS, Azure, or fully on-premises environments.
+
+This project serves as a portfolio centerpiece to showcase advanced, practical skills in Platform Engineering, MLOps, DevSecOps, Hybrid Cloud Architecture, and applied AI.
 
 ## 2. Key Objectives & Showcase Goals
 
 This project is designed to demonstrate the following key competencies to potential employers:
 
-- **Full-Stack Infrastructure Management:** Proficiency in building a platform from the ground up, deploying a production-grade Kubernetes cluster on heterogeneous hardware.
-- **Cloud-Native & Orchestration Mastery:** Deep, practical knowledge of Kubernetes (K3s distribution) as a portable, cloud-agnostic orchestration platform.
-- **Resource-Constrained Engineering:** Ability to design and optimize platform architecture within real-world hardware constraints, demonstrating cost-awareness and efficiency—critical skills for startups and cloud cost optimization.
-- **Heterogeneous Cluster Management:** Advanced expertise in managing multi-architecture clusters (ARM64 + x86_64), mirroring modern edge computing and Apple Silicon adoption trends.
-- **Modern DevOps Best Practices:** Strict adherence to GitOps principles using ArgoCD as the single source of truth for the cluster's state.
-- **Advanced CI/CT/CD Pipeline Engineering:** The ability to design and implement a sophisticated pipeline that handles the unique requirements of ML models, including Continuous Training (CT) and validation.
-- **Integrated Security (DevSecOps):** Security is not an afterthought. The pipeline MUST include automated SAST, SCA, and container vulnerability scanning at every stage.
-- **ML Lifecycle Management:** Understanding of the tools (MLflow, KServe) and processes required to version, deploy, and serve ML models effectively.
-- **Pioneering Multi-Domain AIOps Integration:** 
-  - The innovative use of generative AI (Gemini) to augment platform operations across multiple domains:
-    - **Observability:** Intelligent log analysis and alert contextualization
-    - **ML Operations:** Automated drift detection and model health diagnostics
-    - **Developer Experience:** CI/CD failure triage with actionable remediation steps
-  - Demonstrates the practical application of LLMs to reduce MTTR, improve model reliability, and accelerate developer feedback loops
+- **Hybrid Cloud Architecture:** Ability to design and operate distributed systems spanning cloud and on-premises infrastructure
+- **Cloud-Native & Orchestration Mastery:** Deep, practical knowledge of Kubernetes as a portable, cloud-agnostic orchestration platform
+- **Modern DevOps Best Practices:** Strict adherence to GitOps principles using ArgoCD as the single source of truth for the cluster's state
+- **Advanced CI/CT/CD Pipeline Engineering:** The ability to design and implement a sophisticated pipeline that handles the unique requirements of ML models, including Continuous Training (CT) and validation
+- **Integrated Security (DevSecOps):** Security is not an afterthought. The pipeline MUST include automated SAST, SCA, and container vulnerability scanning at every stage
+- **ML Lifecycle Management:** Understanding of the tools (MLflow, KServe) and processes required to version, deploy, and serve ML models effectively
+- **Multi-Domain AIOps Integration:** 
+  - Intelligent log analysis and alert contextualization
+  - Automated drift detection and model health diagnostics
+  - CI/CD failure triage with actionable remediation steps
+  - Demonstrates practical application of LLMs to reduce MTTR and improve operational efficiency
 
-## 3. Hardware Architecture & Resource Allocation
+## 3. Core Architecture & End-to-End Workflow
 
-### Physical Infrastructure
-This platform runs on a **2-node, heterogeneous, on-premises K3s cluster** built from existing hardware:
+The platform operates in three distinct phases:
 
-**Node 1: MacBook M2 (Control Plane + Lightweight Workloads)**
-- **CPU:** 8 cores (4 performance + 4 efficiency, ARM64 architecture)
-- **RAM:** 16GB total (~10GB allocatable after macOS overhead)
-- **Storage:** Local SSD (250GB+ available)
-- **OS:** macOS (latest stable version)
-- **Network:** Wi-Fi or USB-C Ethernet adapter (recommended for stability)
-- **Role:** K3s server (control plane) + platform services (ArgoCD, MLflow, Prometheus, Grafana)
+### Phase 1: The Platform Foundation (Hybrid Kubernetes Cluster)
 
-**Node 2: Windows PC (Dedicated Worker Node)**
-- **CPU:** Intel i5-1335U (10 cores, x86_64 architecture)
-- **RAM:** 16GB total (~14GB allocatable for workloads)
-- **Storage:** Local SSD/HDD (500GB+ available)
-- **OS:** Windows 11 with WSL2 (Ubuntu 22.04)
-- **Network:** Ethernet (recommended)
-- **Role:** K3s agent (worker node) for compute-intensive workloads (model training, inference)
+#### Cloud Control Plane (GCP e2-small)
+1. **GCP VM Provisioning:** A single e2-small instance (2 vCPU, 2GB RAM) in us-west1-b running Ubuntu 22.04 LTS
+2. **K3s Server Installation:** The VM runs k3s in server mode, hosting the Kubernetes control plane components (API server, scheduler, controller manager, etcd)
+3. **Firewall Configuration:** GCP firewall rules allow inbound traffic on port 6443 (Kubernetes API) from the on-premises worker
+4. **GitOps Controller:** ArgoCD is installed into the cluster and configured to monitor a dedicated Git repository (the "infra-manifests" repo). ALL subsequent platform components are deployed and managed by ArgoCD
 
-### Resource Allocation Strategy
+#### On-Premises Data Plane (Windows Laptop)
+1. **WSL2 Setup:** Windows Subsystem for Linux 2 with Ubuntu 22.04
+2. **K3s Agent Installation:** WSL2 runs k3s in agent mode, connecting to the GCP control plane via the k3s VPN tunnel
+3. **Workload Execution:** This node runs all ML inference workloads (KServe model serving pods)
+4. **24/7 Availability:** Dedicated to the platform, provides consistent compute for production workloads
 
-| Component | Location | Memory Limit | CPU Limit | Rationale |
-|-----------|----------|--------------|-----------|-----------|
-| **K3s Control Plane** | MacBook | 1.5GB | 1 core | Lightweight by design |
-| **ArgoCD** | MacBook | 512MB | 0.5 core | Low overhead GitOps controller |
-| **MLflow** | MacBook | 1GB | 0.5 core | Metadata storage only |
-| **Prometheus** | MacBook | 1.5GB | 1 core | Time-series database |
-| **Grafana** | MacBook | 512MB | 0.5 core | Visualization layer |
-| **KServe Controller** | MacBook | 512MB | 0.5 core | Orchestration only |
-| **Model Serving Pods** | Windows | 4-6GB | 2-4 cores | Inference workloads |
-| **Training Jobs** | Windows | 6-8GB | 4-6 cores | Burst compute for CT pipeline |
-| **System Buffer** | Both | ~3GB | 2 cores | Headroom for stability |
-
-**Total Cluster Resources:** ~24GB RAM, 12-14 CPU cores
-
-### Design Trade-Offs & Constraints
-
-**Accepted Limitations:**
-- ❌ **No High Availability:** Single control plane (no multi-master setup). In production, would deploy 3+ control plane nodes across availability zones.
-- ❌ **No Shared Storage:** Uses local-path provisioner (PersistentVolumes are node-local). In production, would use Longhorn, Ceph, or cloud provider storage classes.
-- ❌ **Limited Horizontal Scaling:** Cannot dynamically add nodes without physical hardware. Demonstrates vertical scaling and resource optimization instead.
-- ⚠️ **Resource Contention:** MacBook node shares resources with daily development work. Mitigated with strict resource limits and QoS classes.
-
-**Strategic Advantages:**
-- ✅ **Zero Hypervisor Overhead:** Native K3s deployment saves ~4GB RAM vs. Proxmox/VM-based setup (20-30% resource efficiency gain)
-- ✅ **Heterogeneous Architecture:** ARM64 + x86_64 cluster demonstrates modern edge computing patterns and Apple Silicon management skills
-- ✅ **Fast Iteration Cycles:** Direct kubectl access without SSH/VM overhead accelerates development
-- ✅ **Cloud Portability:** All Kubernetes manifests are cloud-agnostic and work identically on EKS/GKE/AKS without modification
-- ✅ **Cost Optimization:** $0 infrastructure cost vs. $800-2000 for dedicated homelab server
-
-## 4. Core Architecture & End-to-End Workflow
-
-The platform operates in three distinct phases, plus an enhanced AI intelligence layer:
-
-### Phase 1: The Platform Foundation (On-Premises K3s Cluster)
-1. **K3s Server Bootstrap (MacBook M2):**
-   - Install K3s in server mode on macOS
-   - Configure control plane with reduced footprint (disable Traefik, use CoreDNS)
-   - Apply node taints to prevent heavy workloads from scheduling on control plane
-   - Export kubeconfig for external access
-
-2. **K3s Agent Join (Windows PC via WSL2):**
-   - Install WSL2 with Ubuntu 22.04 on Windows machine
-   - Install K3s in agent mode within WSL2
-   - Join cluster using server token from MacBook
-   - Apply node labels (e.g., `workload=compute-intensive`) for workload targeting
-
-3. **Network Configuration:**
-   - Ensure both machines are on the same local network (192.168.x.x subnet)
-   - Configure firewall rules to allow K3s API traffic (port 6443) and pod communication
-   - Verify cross-node pod networking with test deployments
-
-4. **GitOps Controller Deployment:**
-   - ArgoCD is installed into the Kubernetes cluster on the MacBook node
-   - ArgoCD is configured to monitor a dedicated Git repository (the "infra-manifests" repo)
-   - ALL subsequent platform components are deployed and managed by ArgoCD (no manual kubectl apply)
-
-5. **Storage Provisioner:**
-   - Configure K3s local-path provisioner (default storage class)
-   - Create PersistentVolumes on each node for stateful services
-   - Pin stateful workloads (MLflow, Prometheus) to specific nodes using node affinity
+#### Mac Developer Workstation (Optional)
+- kubectl configured to access the cluster
+- Git client for code commits
+- VS Code for development
+- Does NOT run any Kubernetes components
 
 ### Phase 2: The MLOps CI/CT/CD Pipeline (GitHub Actions)
-1. **Trigger:** A "Data Scientist" persona pushes new model source code, a test dataset, and a `Dockerfile` to a specific GitHub repository (the "model-source" repo).
+
+1. **Trigger:** A "Data Scientist" persona pushes new model source code, a test dataset, and a `Dockerfile` to a specific GitHub repository (the "model-source" repo)
 
 2. **Continuous Integration (CI):**
    - Code quality checks (Flake8) and unit tests (Pytest) are executed
@@ -131,7 +72,7 @@ The platform operates in three distinct phases, plus an enhanced AI intelligence
 4. **Containerization & Security:**
    - A container image is built using the `Dockerfile`
    - The container image is scanned for OS and library vulnerabilities using Trivy. The pipeline fails if critical vulnerabilities are found
-   - The clean image is pushed to a container registry (e.g., Docker Hub, GitHub Container Registry)
+   - The clean image is pushed to a container registry (GitHub Container Registry)
 
 5. **Continuous Deployment (CD) via GitOps Handoff:**
    - The final step of the GitHub Actions workflow does NOT deploy directly to Kubernetes
@@ -139,192 +80,165 @@ The platform operates in three distinct phases, plus an enhanced AI intelligence
    - ArgoCD detects this change in the manifest repo and automatically synchronizes the cluster, rolling out the new model version using the KServe model server
 
 6. **AI-Augmented Failure Handling:**
-   - If ANY step in the pipeline fails, an automated triage workflow is triggered via `workflow_run` event
-   - The triage workflow invokes Gemini with failure-specific context (logs, scan results, error messages)
-   - AI-generated analysis is posted as a commit comment or GitHub Issue with specific remediation steps
+   - If ANY step in the pipeline fails, an automated triage workflow is triggered
+   - The triage workflow invokes Gemini with failure-specific context (logs, error messages, code snippets)
+   - AI-generated analysis is posted as a commit comment or GitHub Issue
    - Developers receive immediate, expert-level guidance without manual log analysis
 
-### Phase 3: The AI-Augmented Monitoring Loop
-1. **Alert Condition:** The Prometheus monitoring stack detects an anomaly (e.g., model inference latency exceeds 500ms, pod crash loop, resource exhaustion).
+### Phase 3: The AI-Augmented Monitoring & Operations Loop
 
-2. **Alert Firing:** Prometheus sends an alert to Alertmanager with full context (pod name, namespace, metric values, duration).
-
-3. **Webhook Trigger:** Alertmanager is configured to fire a webhook to a GitHub Actions `workflow_dispatch` endpoint. The webhook payload contains the full JSON context of the alert.
-
+#### Real-Time Log Analysis
+1. **Alert Condition:** The Prometheus monitoring stack detects an anomaly (e.g., model inference latency exceeds 500ms, pod crash loop, OOMKilled events)
+2. **Alert Firing:** Prometheus sends an alert to Alertmanager
+3. **Webhook Trigger:** Alertmanager fires a webhook to GitHub Actions `workflow_dispatch` endpoint. The webhook payload contains the full JSON context of the alert
 4. **AI Analyst Workflow (GitHub Actions):**
-   - The workflow is triggered by the webhook and parses the alert JSON
-   - It uses `kubectl` with cluster credentials to fetch the logs from the specific pod identified in the alert
-   - It invokes the Gemini CLI (`gcloud alpha gemini chat`) with a structured prompt containing the alert data and the fetched logs
+   - The workflow parses the alert JSON
+   - Uses `kubectl` with cluster credentials to fetch logs from the specific pod identified in the alert
+   - Invokes Gemini CLI (`gemini chat`) with a structured prompt containing alert data and logs
    - **Prompt Template:** "You are an expert MLOps SRE. A high-latency alert has been triggered for a model serving pod. Based on the following alert data and pod logs, provide a brief markdown report with the 3 most likely root causes and a specific, actionable remediation step for each."
+5. **Intelligent Reporting:** The markdown-formatted analysis is posted to a Slack channel or GitHub Issue, providing the on-call engineer with immediate, intelligent context
 
-5. **Intelligent Reporting:** The markdown-formatted analysis from Gemini is then posted to a Slack channel or used to create a new GitHub Issue, providing the on-call engineer with immediate, intelligent context.
-
-### Phase 3.5: Enhanced AI-Augmented Intelligence Layer
-
-Beyond real-time log analysis, the platform leverages Gemini AI for two additional critical operational domains:
-
-#### AI-Powered Model Drift Detection & Analysis
+#### AI-Powered Model Drift Detection
 1. **Trigger Condition:** Prometheus detects model performance degradation:
    - Accuracy drops below defined threshold (e.g., <85%)
-   - Prediction distribution shift detected (via statistical tests)
+   - Prediction distribution shift detected
    - Increased prediction confidence variance
-   - Anomalous inference latency patterns
-
 2. **Automated Context Gathering:**
-   - Fetch current model metrics from MLflow (accuracy, precision, recall, F1, AUC)
+   - Fetch current model metrics from MLflow (accuracy, precision, recall, F1)
    - Retrieve historical performance baselines (last 7, 14, 30 days)
    - Pull feature importance statistics from the current model version
    - Gather inference request metadata (payload distributions, timestamp patterns)
-   - Collect resource utilization metrics (CPU, memory, I/O) during inference
-
 3. **AI Drift Analysis Workflow (GitHub Actions):**
    - Alertmanager webhook triggers a dedicated `drift-analysis.yml` workflow
    - The workflow aggregates all metrics and constructs a structured prompt
-   - **Prompt Template:** "You are an expert ML model monitoring specialist. A production model is experiencing performance degradation. Based on the following metrics comparison [baseline vs current], feature distributions, and temporal patterns, provide: (1) Root cause hypothesis (data drift, concept drift, or model decay), (2) Affected features or data segments, (3) Recommended remediation (retrain, rollback, or feature engineering), (4) Urgency level (P0-P2). Format response as structured markdown with clear action items."
-   - Gemini returns a detailed analysis with confidence scores
-
+   - **Prompt Template:** "You are an expert ML model monitoring specialist. A production model is experiencing performance degradation. Based on the following metrics comparison [baseline vs current], feature distributions, and temporal patterns, provide: (1) Root cause hypothesis (data drift, concept drift, or model decay), (2) Affected features or data segments, (3) Recommended remediation (retrain, rollback, or feature engineering), (4) Urgency level (P0-P2)."
+   - Gemini returns a structured markdown analysis
 4. **Intelligent Response Actions:**
-   - **High-Confidence Drift (P0):** Automatically trigger a retraining pipeline with updated data via GitHub Actions workflow_dispatch
-   - **Medium-Confidence (P1):** Create a GitHub Issue with analysis, tag the ML team, and attach supporting metrics visualizations
-   - **Low-Confidence (P2):** Post analysis to Slack with "investigate" recommendation and link to Grafana dashboard
-   - All actions include the AI-generated hypothesis, supporting metrics, and a decision audit trail
+   - **High-Confidence Drift (P0):** Automatically trigger a retraining pipeline with updated data
+   - **Medium-Confidence (P1):** Create a GitHub Issue with analysis and tag the ML team
+   - **Low-Confidence (P2):** Post analysis to Slack with "investigate" recommendation
+   - All actions include the AI-generated hypothesis and supporting metrics
 
 #### AI-Powered Pipeline Failure Triage
 1. **Trigger Condition:** Any GitHub Actions workflow failure in the model-source repository:
-   - CI stage failures (linting errors, test failures)
-   - Security scan failures (SAST vulnerabilities, SCA license issues, secret leaks, container CVEs)
-   - Training failures (model validation below threshold, OOM errors, data loading issues)
-   - Deployment failures (manifest validation errors, ArgoCD sync failures, image pull errors)
-
+   - CI stage failures (linting, testing)
+   - Security scan failures (SAST, SCA, secrets, container scanning)
+   - Training failures (model validation below threshold)
+   - Deployment failures (manifest validation, ArgoCD sync errors)
 2. **Automated Context Gathering:**
-   - Parse the GitHub Actions workflow run logs using GitHub API
-   - Extract the specific failing step, error messages, and exit codes
-   - Collect relevant file contents if the failure is code-related (e.g., the Python file flagged by Bandit)
-   - Retrieve the last successful run's configuration for comparison (diff analysis)
-   - Fetch commit metadata (author, message, changed files)
-
+   - Parse the GitHub Actions workflow run logs
+   - Extract the specific failing step and error messages
+   - Collect relevant file contents if the failure is code-related (e.g., the file flagged by Bandit)
+   - Retrieve the last successful run's configuration for comparison
 3. **AI Triage Workflow (GitHub Actions):**
    - A `on: workflow_run` trigger activates when any workflow completes with `conclusion: failure`
    - The triage workflow fetches all failure context via GitHub API
    - **Prompt Templates (vary by failure type):**
-     - **Security Scan Failure:** "You are a DevSecOps specialist. A [SAST/SCA/Container] security scan has failed with the following findings: [scan output]. For each finding: (1) Explain the vulnerability in simple terms, (2) Assess actual risk in this ML model context, (3) Provide specific code fix with line numbers, (4) Indicate if it's a false positive and why."
-     - **Test Failure:** "You are a Python testing expert. Unit tests failed with: [pytest output]. Analyze: (1) Root cause of failure (code bug vs. test issue), (2) Which component is affected, (3) Specific fix for the failing test/code with code snippets."
-     - **Model Validation Failure:** "You are an ML engineer. Model training completed but accuracy is [X]%, below threshold [Y]%. Based on training logs: [logs], suggest: (1) Likely causes (data quality issues, hyperparameter tuning needed, overfitting/underfitting), (2) Top 3 specific actions to improve performance with implementation guidance."
-     - **Deployment Failure:** "You are a Kubernetes expert. Deployment failed with: [error]. Analyze: (1) Root cause (manifest syntax, resource limits, image availability), (2) Specific fix for the manifest or configuration."
-   - Gemini returns a detailed, actionable triage report with priority levels
-
+     - **Security Scan Failure:** "You are a DevSecOps specialist. A [SAST/SCA/Container] security scan has failed with the following findings: [scan output]. For each finding: (1) Explain the vulnerability in simple terms, (2) Assess actual risk in this ML context, (3) Provide specific code fix with line numbers, (4) Indicate if it's a false positive."
+     - **Test Failure:** "You are a Python testing expert. Unit tests failed with: [pytest output]. Analyze: (1) Root cause of failure, (2) Whether it's a code bug or test issue, (3) Specific fix for the failing test/code."
+     - **Model Validation Failure:** "You are an ML engineer. Model training completed but accuracy is [X]%, below threshold [Y]%. Based on training logs: [logs], suggest: (1) Likely causes (data quality, hyperparameters, overfitting), (2) Top 3 specific actions to improve performance."
+   - Gemini returns a detailed, actionable triage report
 4. **Automated Developer Feedback:**
-   - Post the AI analysis as a comment directly on the failing commit or pull request
-   - Create a detailed GitHub Issue if the failure is in the main branch with auto-assigned labels
-   - Send a Slack notification with summary + link to full analysis and failed workflow run
+   - Post the AI analysis as a comment directly on the failing commit or PR
+   - Create a detailed GitHub Issue if the failure is in the main branch
+   - Send a Slack notification with summary + link to full analysis
    - Tag relevant team members based on failure type (security team for CVEs, ML team for validation failures)
 
 **Key Design Principle:** The AI does NOT auto-fix code or auto-merge changes. It accelerates human decision-making by providing expert-level analysis and specific, actionable recommendations. The human developer remains in control of all remediation actions.
 
-## 5. Technology Stack
+## 4. Technology Stack
 
-- **Orchestration:** Kubernetes (K3s distribution - lightweight, production-grade, CNCF-certified)
-- **Operating Systems:** 
-  - macOS (ARM64) for control plane node
-  - Windows 11 + WSL2 (Ubuntu 22.04, x86_64) for worker node
-- **CI/CD & Automation:** GitHub Actions (cloud-hosted runners)
+**Cloud Infrastructure:**
+- **Cloud Provider:** Google Cloud Platform (GCP)
+- **Compute:** e2-small instance (2 vCPU, 2GB RAM, Ubuntu 22.04 LTS)
+- **Region:** us-west1-b (Free tier eligible, low latency to West Coast)
+
+**On-Premises Infrastructure:**
+- **OS:** Windows 11 with WSL2 (Ubuntu 22.04)
+- **Runtime:** Docker Desktop (for WSL2 integration)
+
+**Orchestration & Platform:**
+- **Kubernetes Distribution:** K3s (lightweight, production-ready)
+- **Control Plane:** GCP e2-small (k3s server mode)
+- **Data Plane:** Windows WSL2 (k3s agent mode)
 - **GitOps Controller:** ArgoCD
-- **Containerization:** Docker / Buildx (multi-architecture image builds)
-- **Container Registry:** Docker Hub or GitHub Container Registry
-- **MLOps Tooling:**
-  - **Model Registry:** MLflow (tracking experiments, versioning models, storing metrics)
-  - **Model Serving:** KServe (serverless inference platform with auto-scaling)
-- **DevSecOps Tooling:**
-  - **SAST (Static Application Security Testing):** Bandit (Python security linter)
-  - **SCA (Software Composition Analysis):** Snyk (dependency vulnerability scanning)
-  - **Secrets Detection:** Gitleaks (prevent credential leaks)
-  - **Container Scanning:** Trivy (OS and library vulnerability detection)
-- **Monitoring & Alerting:**
-  - **Metrics Collection:** Prometheus (TSDB for metrics scraping and storage)
-  - **Visualization:** Grafana (dashboards for metrics and logs)
-  - **Alerting:** Alertmanager (alert routing and webhook triggers)
-  - **Optional:** Loki for log aggregation (if resources permit)
-- **Storage:** K3s local-path provisioner (node-local persistent volumes)
-- **Networking:** K3s built-in networking (Flannel CNI)
-- **AI Integration:** Google Cloud CLI with Gemini (`gcloud alpha gemini chat`)
-  - **Use Cases:**
-    - Real-time log analysis for production alerts
-    - Model drift detection and root cause hypothesis generation
-    - CI/CD pipeline failure triage and remediation guidance
-    - Automated incident report generation
+- **Containerization:** Docker / Buildx
 
-## 6. Guiding Principles
+**CI/CD & Automation:**
+- **CI/CD Platform:** GitHub Actions (free for public repos)
+- **Container Registry:** GitHub Container Registry (GHCR)
 
-- **Infrastructure as Code (IaC):** All infrastructure and platform configuration MUST be defined declaratively in code and stored in Git. No snowflake configurations.
-- **GitOps is the Source of Truth:** The state of the Kubernetes cluster MUST reflect the state of the main branch of the manifests repository. No manual `kubectl apply` commands in production workflows.
-- **Automation First:** Every repetitive task, from testing to deployment and analysis, should be automated. Humans focus on strategy, AI and automation handle execution.
-- **Immutable Infrastructure:** Containers are treated as immutable artifacts. To change a running application, a new image is built and deployed (never SSH into a container to "fix" it).
-- **Security is Shift-Left:** Security checks are integrated into the earliest possible stages of the pipeline. Fail fast on critical vulnerabilities.
-- **Resource Efficiency:** Operate within hardware constraints through aggressive resource limits, QoS classes, and workload placement strategies. Demonstrate cost-awareness applicable to cloud environments.
-- **Observability by Design:** Every component must expose metrics (Prometheus format) and structured logs. Instrument code for debugging and monitoring.
-- **AI Augments, Humans Decide:** AI provides analysis and recommendations. Humans validate and execute remediation actions. No autonomous code changes or deployments.
+**MLOps Tooling:**
+- **Model Registry:** MLflow (tracking server + artifact store)
+- **Model Serving:** KServe (Kubernetes-native inference)
 
-## 7. Success Criteria & Portfolio Impact
+**DevSecOps Tooling:**
+- **SAST:** Bandit (Python security linter)
+- **SCA:** Snyk (dependency vulnerability scanning)
+- **Secrets Detection:** Gitleaks
+- **Container Scanning:** Trivy (OS + library CVEs)
 
-This project successfully demonstrates the following:
+**Monitoring & Alerting:**
+- **Metrics Collection:** Prometheus
+- **Visualization:** Grafana
+- **Alert Routing:** Alertmanager
+- **Webhook Integration:** GitHub Actions workflow_dispatch
 
-✅ **End-to-End MLOps Lifecycle:** From git push to production model serving with full observability  
-✅ **Production-Grade Architecture:** GitOps, immutable infrastructure, security scanning, monitoring  
-✅ **Cloud-Native Portability:** Kubernetes manifests work identically on any cloud provider or on-premises  
-✅ **AIOps Innovation:** Multi-domain AI integration (logs, drift, triage) demonstrating forward-thinking operations  
-✅ **Resource Optimization:** Efficient platform design within real-world constraints (applicable to cost optimization)  
-✅ **DevSecOps Integration:** Security at every pipeline stage, not as an afterthought  
-✅ **Modern Skills:** K3s, ArgoCD, KServe, Prometheus, Gemini API, heterogeneous clusters (ARM + x86)
+**AI Integration:**
+- **LLM Provider:** Google Gemini API
+- **Interface:** Gemini API (REST) via Python SDK
+- **Use Cases:**
+  - Real-time log analysis for production alerts
+  - Model drift detection and root cause hypothesis
+  - CI/CD pipeline failure triage and remediation guidance
+  - Automated incident report generation
 
-**Interview Value Proposition:**
-"I built a production-grade MLOps platform on a heterogeneous, on-premises K3s cluster that demonstrates the full ML lifecycle—from GitOps-driven deployments to AI-augmented monitoring. The platform handles model drift detection, pipeline failure triage, and intelligent alerting using Gemini, reducing MTTR and accelerating developer feedback loops. All architecture decisions prioritize cloud portability, resource efficiency, and security-first design."
+## 5. Guiding Principles
 
-## 8. Project Scope & Boundaries
+- **Infrastructure as Code (IaC):** All infrastructure and platform configuration MUST be defined declaratively in code and stored in Git
+- **GitOps is the Source of Truth:** The state of the Kubernetes cluster MUST reflect the state of the main branch of the manifests repository. No manual `kubectl apply` commands
+- **Automation First:** Every repetitive task, from testing to deployment and analysis, should be automated
+- **Immutable Infrastructure:** Containers are treated as immutable artifacts. To change a running application, a new image is built and deployed
+- **Security is Shift-Left:** Security checks are integrated into the earliest possible stages of the pipeline
+- **Cloud-Agnostic Design:** Despite using GCP, the platform is architected with portability in mind. All infrastructure is Kubernetes-native (no GCP-specific services like GKE, Cloud Run, etc.). The platform can be migrated to AWS, Azure, or fully on-premises by changing only the control plane VM
+- **Hybrid Architecture:** Demonstrates real-world patterns where control planes run in the cloud for management simplicity, while data planes run on-premises for data sovereignty, cost optimization, or latency requirements
 
-**In Scope:**
-- Full CI/CT/CD pipeline with security scanning
-- GitOps-based deployment workflow
-- Model serving with KServe
-- Production monitoring with Prometheus/Grafana
-- AI-powered log analysis, drift detection, and pipeline triage
-- Multi-node K3s cluster management
-- Documentation and portfolio presentation materials
+## 6. Project Timeline & Milestones
 
-**Out of Scope:**
-- High availability / multi-master control plane (single control plane accepted)
-- Distributed storage solutions (Longhorn, Ceph) - using local-path provisioner
-- Service mesh (Istio, Linkerd) - adds complexity without clear value in 2-node cluster
-- Advanced ML features (A/B testing, multi-armed bandits, AutoML) - focus is on platform, not ML research
-- GPU acceleration - not required for scikit-learn/XGBoost models
-- External secrets management (HashiCorp Vault) - using Kubernetes secrets with planned SealedSecrets
+**Total Duration:** 2 weeks
 
-**Model Selection Strategy:**
-Use lightweight, fast-training models for demonstrations:
-- ✅ Scikit-learn (Random Forest, Logistic Regression, XGBoost)
-- ✅ Small PyTorch models (<100M parameters)
-- ✅ ONNX-optimized models
-- ❌ Large language models (resource-prohibitive)
-- ❌ Computer vision transformers (require GPU)
+**Week 1: Foundation & CI/CD**
+- Day 1-2: GCP VM setup, k3s control plane, Windows worker join
+- Day 3-4: ArgoCD installation, MLflow deployment, basic monitoring
+- Day 5-7: GitHub Actions CI/CT/CD pipeline, security scanning integration
 
-Example use case: Sentiment analysis, fraud detection, or customer churn prediction with structured data.
+**Week 2: AIOps & Polish**
+- Day 8-9: Prometheus alerting rules, Gemini log analysis workflow
+- Day 10-11: Model drift detection, pipeline triage workflows
+- Day 12-14: Testing, documentation, demo preparation, teardown preparation
 
-## 9. Future Enhancements (Post-MVP)
+## 7. Cost Analysis
 
-Once the core platform is operational, consider these enhancements:
+**GCP Costs (e2-small, us-west1):**
+- Hourly Rate: ~$0.018/hour
+- Daily Cost: ~$0.43/day
+- 2-Week Cost: ~$6.50 total
+- Monthly Cost (if extended): ~$13/month
 
-- **Automated Incident Reports:** Use Gemini to generate postmortem documents after incidents
-- **Natural Language Ops Interface:** Slack bot for querying cluster state ("What's the P95 latency for model v2?")
-- **Predictive Capacity Planning:** AI analyzes historical metrics to recommend scaling actions
-- **SealedSecrets Integration:** Encrypt secrets in Git for true GitOps compliance
-- **Canary Deployments:** Implement progressive rollouts with KServe's traffic splitting
-- **Model Performance SLOs:** Define and monitor Service Level Objectives for model accuracy/latency
-- **Cost Tracking Dashboard:** Monitor resource usage and calculate "cloud equivalent" costs
-- **Migration Path Documentation:** Guide for migrating this architecture to AWS EKS or GCP GKE
+**Other Costs:**
+- GitHub Actions: $0 (free for public repos)
+- Gemini API: $0 (free tier: 15 requests/min, 1500 requests/day)
+- Domain/SSL: $0 (using cluster IPs or ngrok for demos)
 
----
+**Total Project Cost: ~$6.50**
 
-**Document Version:** 2.0  
-**Last Updated:** October 2025  
-**Architecture:** K3s Multi-Node (ARM64 + x86_64)  
-**Status:** Ready for implementation
+## 8. Teardown Strategy
 
+When the project is complete:
+1. Delete the GCP e2-small instance (stops billing immediately)
+2. Uninstall k3s from Windows WSL2: `sudo /usr/local/bin/k3s-agent-uninstall.sh`
+3. Archive Git repositories (make them private or delete)
+4. Export metrics/logs/screenshots for portfolio documentation
+5. Document lessons learned in project README
+
+**No ongoing costs after teardown.**
