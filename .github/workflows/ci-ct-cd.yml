@@ -88,7 +88,7 @@ jobs:
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
-    needs: [code-quality] # This job depends on the code-quality job
+    needs: [code-quality]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -98,11 +98,20 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install system build dependencies
+        run: |
+          # Install C/C++ compilers and build tools needed to compile from source
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Install Python dependencies from source
         run: |
           python -m pip install --upgrade pip
-          # Install all dependencies from a single file in one command
-          pip install -r requirements.txt
+          # THE CRITICAL FIX:
+          # --no-binary :all: tells pip to ignore all pre-compiled wheels
+          # and build every package from its source distribution.
+          # This guarantees binary compatibility.
+          pip install --no-cache-dir --no-binary :all: -r requirements.txt
 
       - name: Run unit tests with coverage
         run: |
