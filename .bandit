@@ -1,16 +1,3 @@
-# Bandit configuration for ML project
-# Skip false positives while maintaining security coverage
-
 [bandit]
-# Exclude test files from some checks
-exclude: /tests/
-
-# Skip these checks globally:
-# - B403/B301: Pickle usage (required for ML models)
-# - B104: Binding to 0.0.0.0 (required for containers)
-# - B101: Assert usage (false positive in tests)
-skips: B403,B301,B104,B101
-
-# Focus on high/medium severity issues
-severity: medium
-confidence: high
+exclude = /tests/
+skips = B403,B301,B104,B101
