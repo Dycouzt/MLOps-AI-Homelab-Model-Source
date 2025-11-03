@@ -10,3 +10,4 @@ venv
 *.md
 .gitignore
 tests/
+master_context*.txt

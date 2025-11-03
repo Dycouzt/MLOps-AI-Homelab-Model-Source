@@ -14,7 +14,7 @@ A simple RandomForest classifier for the Iris dataset, demonstrating the full ML
 ### Train the model
 ```bash
 pip install -r requirements.txt
-export MLFLOW_TRACKING_URI=http://YOUR_GCP_IP:30500
+export MLFLOW_TRACKING_URI=http://34.145.47.22:30500
 python train.py
 ```
 
