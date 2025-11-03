@@ -150,7 +150,7 @@ jobs:
   build-and-scan:
     name: Build & Scan Container
     runs-on: ubuntu-latest
-    needs: [train, dependency-scan, secrets-scan]
+    needs: [train, secrets-scan]
     permissions:
       contents: read
       packages: write
