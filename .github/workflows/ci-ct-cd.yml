@@ -10,7 +10,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  MLFLOW_TRACKING_URI: http://YOUR_GCP_PUBLIC_IP:30500  # REPLACE with your GCP IP
+  MLFLOW_TRACKING_URI: http://34.145.47.22:30500 # GCP IP
 
 jobs:
   # Stage 1: Code Quality & Security Checks
@@ -41,8 +41,10 @@ jobs:
 
       - name: SAST - Security scan with Bandit
         run: |
-          bandit -r . -f json -o bandit-report.json || true
-          bandit -r . -f screen
+          # Run Bandit with config file (skips false positives)
+          bandit -r . -c .bandit -f json -o bandit-report.json || true
+          bandit -r . -c .bandit -f screen
+          echo "✅ SAST scan completed. Review findings in bandit-report.json"
 
       - name: Upload Bandit report
         uses: actions/upload-artifact@v4
@@ -51,21 +53,21 @@ jobs:
           name: bandit-report
           path: bandit-report.json
 
-  # Stage 2: Dependency Scanning
-  dependency-scan:
-    name: SCA - Dependency Vulnerability Scan
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Run Snyk to check for vulnerabilities
-        uses: snyk/actions/python@master
-        continue-on-error: true
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high --file=requirements.txt
+ # Stage 2: Dependency Scanning (COMMENTED OUT - requires Snyk account)
+# dependency-scan:
+#   name: SCA - Dependency Vulnerability Scan
+#   runs-on: ubuntu-latest
+#   steps:
+#     - name: Checkout code
+#       uses: actions/checkout@v4
+#
+#     - name: Run Snyk to check for vulnerabilities
+#       uses: snyk/actions/python@master
+#       continue-on-error: true
+#       env:
+#         SNYK_TOKEN: $ {{ secrets.SNYK_TOKEN }}
+#       with:
+#         args: --severity-threshold=high --file=requirements.txt
 
   # Stage 3: Secrets Detection
   secrets-scan:
