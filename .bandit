@@ -1,3 +1,7 @@
-[bandit]
-exclude = /tests/
-skips = B403,B301,B104,B101
+skips:
+  - 'B403'
+  - 'B301'
+  - 'B104'
+  - 'B101'
+exclude_dirs:
+  - tests
