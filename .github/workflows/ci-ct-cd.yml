@@ -228,13 +228,20 @@ jobs:
         - name: Update image tag in manifests
           run: |
             cd infra-repo
-            NEW_TAG="${{ needs.build-and-scan.outputs.image-tag }}"
+            # get only the first tag from the output
+            NEW_TAG="$(echo '${{ needs.build-and-scan.outputs.image-tag }}' | head -n1)"
             echo "Updating to image: $NEW_TAG"
-            sed -i "s|image:.*|image: ${NEW_TAG}|g" applications/iris-classifier/deployment.yaml
+    
+            # escape slashes for sed
+            ESCAPED_TAG=$(printf '%s\n' "$NEW_TAG" | sed 's/[\/&]/\\&/g')
+    
+            # update the deployment manifest
+            sed -i "s|image:.*|image: ${ESCAPED_TAG}|g" applications/iris-classifier/deployment.yaml
+    
             git config user.name "GitHub Actions"
             git config user.email "actions@github.com"
             git add applications/iris-classifier/deployment.yaml
-            git commit -m "Update iris-classifier to ${NEW_TAG}" || echo "No changes to commit"
+            git commit -m "Update iris-classifier to ${ESCAPED_TAG}" || echo "No changes to commit"
             git push
 
         - name: Create deployment notification
