@@ -180,13 +180,20 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Run Trivy vulnerability scanner
-        id: trivy-scan
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@v0.8.0
+
+      - name: Run Trivy vulnerability scanner (dynamic lowercase safe)
         run: |
           IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:${{ github.sha }}" | tr '[:upper:]' '[:lower:]')
           echo "Scanning image: $IMAGE_NAME"
-          trivy image "$IMAGE_NAME" --format sarif --output trivy-results.sarif --severity CRITICAL,HIGH --ignore-unfixed --vuln-type os,library
-
+          trivy image "$IMAGE_NAME" \
+            --format sarif \
+            --output trivy-results.sarif \
+            --severity CRITICAL,HIGH \
+            --ignore-unfixed \
+            --vuln-type os,library
+    
       - name: Upload Trivy results
         uses: actions/upload-artifact@v4
         if: always()
