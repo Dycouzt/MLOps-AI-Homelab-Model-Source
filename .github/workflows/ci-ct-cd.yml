@@ -180,20 +180,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Set up Trivy
-        uses: aquasecurity/setup-trivy@v0.8.0
+      - name: Run Trivy vulnerability scanner
+        id: trivy-scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/mlops-ai-homelab-model-source:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          exit-code: '0'  # Don't fail pipeline on vulnerabilities
 
-      - name: Run Trivy vulnerability scanner (dynamic lowercase safe)
-        run: |
-          IMAGE_NAME=$(echo "ghcr.io/${{ github.repository }}:${{ github.sha }}" | tr '[:upper:]' '[:lower:]')
-          echo "Scanning image: $IMAGE_NAME"
-          trivy image "$IMAGE_NAME" \
-            --format sarif \
-            --output trivy-results.sarif \
-            --severity CRITICAL,HIGH \
-            --ignore-unfixed \
-            --vuln-type os,library
-    
       - name: Upload Trivy results
         uses: actions/upload-artifact@v4
         if: always()
