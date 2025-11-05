@@ -130,115 +130,114 @@ jobs:
           name: trained-model
           path: model.pkl
 
-  # Stage 5: Build & Scan Container Image
+    # Stage 5: Build & Scan Container Image
   build-and-scan:
     name: Build & Scan Container
     runs-on: ubuntu-latest
     needs: [train, secrets-scan]
     permissions:
-      contents: read
-      packages: write
+        contents: read
+        packages: write
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
+        image-tag: ${{ steps.meta.outputs.tags }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+        - name: Checkout code
+          uses: actions/checkout@v4
 
-      - name: Download model artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: trained-model
+        - name: Download model artifact
+          uses: actions/download-artifact@v4
+          with:
+            name: trained-model
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+        - name: Log in to GitHub Container Registry
+          uses: docker/login-action@v3
+          with:
+            registry: ${{ env.REGISTRY }}
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha,prefix={{branch}}-
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
+        - name: Extract metadata for Docker
+          id: meta
+          uses: docker/metadata-action@v5
+          with:
+            images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            tags: |
+              type=sha,prefix={{branch}}-
+              type=ref,event=branch
+              type=ref,event=pr
+              type=semver,pattern={{version}}
 
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          load: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        - name: Build Docker image (local + GHCR tags)
+          uses: docker/build-push-action@v5
+          with:
+            context: .
+            push: false          # don't push yet
+            load: true           # load to local Docker
+            tags: |
+              mlops-ai-homelab-model-source:local
+              ${{ steps.meta.outputs.tags }}
+            cache-from: type=gha
+            cache-to: type=gha,mode=max
 
-      - name: Run Trivy vulnerability scanner
-        id: trivy-scan
-        uses: aquasecurity/trivy-action@master
-        with:
-            image-ref: ${{ steps.meta.outputs.tags }}
+        - name: Run Trivy vulnerability scanner
+          id: trivy-scan
+          uses: aquasecurity/trivy-action@master
+          with:
+            image-ref: mlops-ai-homelab-model-source:local  # scan local image
             format: 'sarif'
             output: 'trivy-results.sarif'
             severity: 'CRITICAL,HIGH'
             ignore-unfixed: true
             vuln-type: 'os,library'
-            exit-code: '0' # Don't fail pipeline on vulnerabilities
+            exit-code: '0'
 
-      - name: Upload Trivy results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: trivy-results
-          path: trivy-results.sarif
+        - name: Upload Trivy results
+          uses: actions/upload-artifact@v4
+          if: always()
+          with:
+            name: trivy-results
+            path: trivy-results.sarif
 
-      - name: Push Docker image
-        if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        - name: Push Docker image to GHCR
+          if: github.event_name != 'pull_request'
+          uses: docker/build-push-action@v5
+          with:
+            context: .
+            push: true
+            tags: ${{ steps.meta.outputs.tags }}
+            cache-from: type=gha
+            cache-to: type=gha,mode=max
 
   # Stage 6: GitOps Update (Continuous Deployment)
   deploy:
-    name: Update GitOps Manifests
-    runs-on: ubuntu-latest
-    needs: [build-and-scan]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Checkout infra repo
-        uses: actions/checkout@v4
-        with:
-          repository: Dycouzt/MLOps-AI-Homelab-Infra-Manifests
-          token: ${{ secrets.INFRA_REPO_PAT }}
-          path: infra-repo
+      name: Update GitOps Manifests
+      runs-on: ubuntu-latest
+      needs: [build-and-scan]
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      steps:
+        - name: Checkout infra repo
+          uses: actions/checkout@v4
+          with:
+            repository: Dycouzt/MLOps-AI-Homelab-Infra-Manifests
+            token: ${{ secrets.INFRA_REPO_PAT }}
+            path: infra-repo
 
-      - name: Update image tag in manifests
-        run: |
-          cd infra-repo
-          NEW_TAG="${{ needs.build-and-scan.outputs.image-tag }}"
-          echo "Updating to image: $NEW_TAG"
-          
-          # Update the deployment manifest
-          sed -i "s|image:.*|image: ${NEW_TAG}|g" applications/iris-classifier/deployment.yaml
-          
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git add applications/iris-classifier/deployment.yaml
-          git commit -m "Update iris-classifier to ${NEW_TAG}" || echo "No changes to commit"
-          git push
+        - name: Update image tag in manifests
+          run: |
+            cd infra-repo
+            NEW_TAG="${{ needs.build-and-scan.outputs.image-tag }}"
+            echo "Updating to image: $NEW_TAG"
+            sed -i "s|image:.*|image: ${NEW_TAG}|g" applications/iris-classifier/deployment.yaml
+            git config user.name "GitHub Actions"
+            git config user.email "actions@github.com"
+            git add applications/iris-classifier/deployment.yaml
+            git commit -m "Update iris-classifier to ${NEW_TAG}" || echo "No changes to commit"
+            git push
 
-      - name: Create deployment notification
-        run: |
-          echo "✅ Deployment manifest updated successfully"
-          echo "ArgoCD will sync the new image to the cluster"
+        - name: Create deployment notification
+          run: |
+            echo "✅ Deployment manifest updated successfully"
+            echo "ArgoCD will sync the new image to the cluster"
