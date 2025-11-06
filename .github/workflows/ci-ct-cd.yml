@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: dycouzt/mlops-ai-homelab-model-source
+  IMAGE_NAME: ${{ github.repository }}
   MLFLOW_TRACKING_URI: http://34.145.47.22:30500  # Your GCP IP
 
 jobs:
@@ -139,7 +139,7 @@ jobs:
         contents: read
         packages: write
     outputs:
-        image-tag: ${{ steps.meta.outputs.tags }}
+        image-tag: ${{ steps.set-output.outputs.image-tag }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -161,17 +161,40 @@ jobs:
 
     - name: Build and push Docker image with SHA tag
       id: build
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        push: true
-        tags: |
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+      run: |
+        # Force lowercase repo name
+        IMAGE_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+        IMAGE_TAG="${{ env.REGISTRY }}/${IMAGE_NAME_LOWER}:${GITHUB_SHA}"
 
-    - name: Set output image tag
-      run: echo "image-tag=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}" >> $GITHUB_OUTPUT
+        echo "Building and pushing image: $IMAGE_TAG"
+
+        docker buildx build \
+          --cache-from type=gha \
+          --cache-to type=gha,mode=max \
+          --push \
+          -t "$IMAGE_TAG" .
+
+        # Set output
+        echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Run Trivy vulnerability scanner
+      id: trivy-scan
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ steps.build.outputs.image-tag }}
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+        severity: 'CRITICAL,HIGH'
+        ignore-unfixed: true
+        vuln-type: 'os,library'
+        exit-code: '0'
+
+    - name: Upload Trivy results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: trivy-results
+        path: trivy-results.sarif
 
   # Stage 6: GitOps Update (Continuous Deployment)
   deploy:
