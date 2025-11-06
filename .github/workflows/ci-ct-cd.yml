@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository | lower }}
+  IMAGE_NAME: dycouzt/mlops-ai-homelab-model-source
   MLFLOW_TRACKING_URI: http://34.145.47.22:30500  # Your GCP IP
 
 jobs:
