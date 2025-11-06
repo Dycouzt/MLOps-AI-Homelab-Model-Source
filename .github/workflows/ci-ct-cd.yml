@@ -139,7 +139,7 @@ jobs:
         contents: read
         packages: write
     outputs:
-        image-tag: ${{ steps.set-output.outputs.image-tag }}
+        image-tag: ${{ steps.build.outputs.image-tag }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
