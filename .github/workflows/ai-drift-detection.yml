@@ -137,8 +137,8 @@ jobs:
             ## 📉 Model Drift Detected: ${{ inputs.model_name }}
             
             **Severity:** ${severity}  
-            **Current Accuracy:** ${{ inputs.current_accuracy }} (${{ github.event.inputs.current_accuracy * 100 }}%)  
-            **Baseline Accuracy:** ${{ inputs.baseline_accuracy }} (${{ github.event.inputs.baseline_accuracy * 100 }}%)  
+            **Current Accuracy:** ${{ inputs.current_accuracy }} (${{ steps.ai-analysis.outputs.CURRENT_PCT }}%)  
+            **Baseline Accuracy:** ${{ inputs.baseline_accuracy }} (${{ steps.ai-analysis.outputs.BASELINE_PCT }}%)  
             **Drift:** ${driftPercent}% decrease  
             **Detection Time:** ${new Date().toISOString()}
             
