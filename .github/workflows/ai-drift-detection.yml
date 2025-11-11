@@ -26,7 +26,7 @@ jobs:
         id: mlflow-metrics
         run: |
           # Fetch metrics from MLflow API
-          MLFLOW_URI="http://35.185.213.69:30500"  # Replace with your GCP IP
+          MLFLOW_URI="http://34.145.47.22:30500"  # Replace with your GCP IP
           
           # Get recent runs for the model
           RUNS=$(curl -s "${MLFLOW_URI}/api/2.0/mlflow/experiments/get-by-name?experiment_name=iris-classification" | jq -r '.experiment.experiment_id')
@@ -162,9 +162,9 @@ jobs:
             
             ## 🔗 Resources
             
-            - [MLflow Experiment](http://YOUR_GCP_IP:30500/#/experiments)
+            - [MLflow Experiment](http://34.145.47.22:30500/#/experiments)
             - [Model Deployment](https://github.com/${{ github.repository }}/actions)
-            - [Grafana Dashboard](http://YOUR_GCP_IP:30300)
+            - [Grafana Dashboard](http://34.145.47.22:30300)
             
             ---
             
