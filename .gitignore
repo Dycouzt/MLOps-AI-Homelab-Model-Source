@@ -10,3 +10,5 @@ venv/
 .coverage
 htmlcov/
 .DS_Store
+master_context_v1.txt
+master_context_v2.txt
