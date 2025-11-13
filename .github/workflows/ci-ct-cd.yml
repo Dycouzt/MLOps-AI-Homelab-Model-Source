@@ -10,7 +10,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  MLFLOW_TRACKING_URI: http://34.145.47.22:30500  # Your GCP IP
 
 jobs:
   # Stage 1: Code Quality & Security Checks
@@ -29,19 +28,15 @@ jobs:
       - name: Install linting dependencies
         run: |
           python -m pip install --upgrade pip
-          # Use --no-cache-dir to force a clean install
           pip install --no-cache-dir -r requirements-dev.txt
 
       - name: Lint with flake8
         run: |
-          # Stop the build if there are Python syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Exit-zero treats all errors as warnings
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
       - name: SAST - Security scan with Bandit
         run: |
-          # Run Bandit with config file (skips false positives)
           bandit -r . -c .bandit -f json -o bandit-report.json || true
           bandit -r . -c .bandit -f screen
           echo "✅ SAST scan completed. Review findings in bandit-report.json"
@@ -61,7 +56,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Fetch all history for gitleaks
+          fetch-depth: 0
 
       - name: Run Gitleaks
         uses: gitleaks/gitleaks-action@v2
@@ -89,6 +84,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run unit tests
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
           pytest tests/ -v --cov=. --cov-report=xml --cov-report=term
 
@@ -119,7 +116,7 @@ jobs:
 
       - name: Train model
         env:
-          MLFLOW_TRACKING_URI: ${{ env.MLFLOW_TRACKING_URI }}
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
           python train.py
           echo "MODEL_TRAINED=true" >> $GITHUB_ENV
@@ -162,7 +159,6 @@ jobs:
     - name: Build and push Docker image with SHA tag
       id: build
       run: |
-        # Force lowercase repo name
         IMAGE_NAME_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
         IMAGE_TAG="${{ env.REGISTRY }}/${IMAGE_NAME_LOWER}:${GITHUB_SHA}"
 
@@ -174,7 +170,6 @@ jobs:
           --push \
           -t "$IMAGE_TAG" .
 
-        # Set output
         echo "image-tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
 
     - name: Run Trivy vulnerability scanner
@@ -214,7 +209,6 @@ jobs:
       run: |
         cd infra-repo
 
-        # Use the lowercase repo name and SHA tag from build stage
         NEW_TAG="${{ needs.build-and-scan.outputs.image-tag }}"
         echo "Updating deployment image to: $NEW_TAG"
 
@@ -223,10 +217,8 @@ jobs:
           exit 1
         fi
 
-        # Replace 'image:' line in deployment.yaml, preserving indentation
         sed -i "s|^\(\s*image:\).*|\1 ${NEW_TAG}|g" applications/iris-classifier/deployment.yaml
 
-        # Commit & push only if changes exist
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
         git add applications/iris-classifier/deployment.yaml
