@@ -111,7 +111,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const analysis = JSON.parse(`${{ steps.ai-analysis.outputs.ANALYSIS }}`);
+            const analysis = `${{ steps.ai-analysis.outputs.ANALYSIS }}`; // treat as string, do NOT JSON.parse
             const driftPercent = parseFloat(`${{ steps.ai-analysis.outputs.DRIFT_PERCENT }}`);
 
             let severity = "P2";
@@ -146,7 +146,7 @@ jobs:
             ## Resources
             - MLflow: ${{ env.MLFLOW_TRACKING_URI }}
             - Deployment: https://github.com/${{ github.repository }}/actions
-            `
+            `;
 
             await github.rest.issues.create({
               owner: context.repo.owner,
