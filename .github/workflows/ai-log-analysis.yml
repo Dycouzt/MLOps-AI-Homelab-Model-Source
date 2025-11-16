@@ -3,13 +3,6 @@ name: AI Log Analysis - Production Alert Handler
 on:
   workflow_dispatch:
     inputs:
-      cluster:
-        description: 'Cluster name (gcp/k3d)'
-        required: true
-        type: choice
-        options:
-          - gcp
-          - k3d
       alert_name:
         description: 'Alert name from Prometheus'
         required: true
@@ -32,30 +25,28 @@ jobs:
   analyze-logs:
     name: AI-Powered Log Analysis
     runs-on: ubuntu-latest
-
     steps:
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
         with:
           version: 'latest'
 
-      - name: Configure kubectl for target cluster
+      - name: Configure kubectl for GCP cluster
         run: |
           mkdir -p ~/.kube
-          if [ "${{ inputs.cluster }}" == "gcp" ]; then
-            echo "${{ secrets.KUBECONFIG_GCP }}" | base64 -d > ~/.kube/config
-            kubectl config use-context gcp
-          else
-            echo "${{ secrets.KUBECONFIG_K3D }}" | base64 -d > ~/.kube/config
-            kubectl config use-context k3d
-          fi
+          echo "${{ secrets.KUBECONFIG_GCP }}" | base64 -d > ~/.kube/config
+          kubectl config use-context gcp
 
       - name: Fetch pod logs
         id: get-logs
         run: |
           echo "Fetching logs for pod: ${{ inputs.pod_name }}"
           LOG_OUTPUT=$(kubectl logs ${{ inputs.pod_name }} -n ${{ inputs.namespace }} --tail=100 2>&1 || echo "Failed to fetch logs")
+          
+          # Save logs to file for artifact upload
           echo "$LOG_OUTPUT" > pod-logs.txt
+          
+          # Escape logs for JSON (remove newlines, escape quotes)
           LOG_ESCAPED=$(echo "$LOG_OUTPUT" | jq -Rs .)
           echo "LOGS=$LOG_ESCAPED" >> $GITHUB_OUTPUT
 
@@ -64,6 +55,7 @@ jobs:
         run: |
           echo "Fetching events for pod: ${{ inputs.pod_name }}"
           EVENTS=$(kubectl get events -n ${{ inputs.namespace }} --field-selector involvedObject.name=${{ inputs.pod_name }} --sort-by='.lastTimestamp' 2>&1 || echo "No events found")
+          
           echo "$EVENTS" > pod-events.txt
           EVENTS_ESCAPED=$(echo "$EVENTS" | jq -Rs .)
           echo "EVENTS=$EVENTS_ESCAPED" >> $GITHUB_OUTPUT
@@ -82,8 +74,8 @@ jobs:
           
           # Get access token
           ACCESS_TOKEN=$(gcloud auth print-access-token)
-
-          # Escape logs/events for JSON
+          
+          # Escape logs and events for JSON
           LOGS_ESCAPED=$(echo '${{ steps.get-logs.outputs.LOGS }}' | jq -Rs .)
           EVENTS_ESCAPED=$(echo '${{ steps.get-events.outputs.EVENTS }}' | jq -Rs .)
           
@@ -93,7 +85,7 @@ jobs:
             "contents": [{
               "role": "user",
               "parts": [{
-                "text": "You are an expert MLOps Site Reliability Engineer analyzing a production alert for a machine learning model serving system.\n\n**Cluster:** ${{ inputs.cluster }}\n**Alert Details:**\n- Alert Name: ${{ inputs.alert_name }}\n- Severity: ${{ inputs.alert_severity }}\n- Pod: ${{ inputs.pod_name }}\n- Namespace: ${{ inputs.namespace }}\n\n**Pod Logs (last 100 lines):**\n${LOGS_ESCAPED}\n\n**Kubernetes Events:**\n${EVENTS_ESCAPED}\n\n**Your Task:**\nProvide a concise markdown analysis with:\n1. **Root Cause Hypothesis** (3 most likely causes, ranked by probability)\n2. **Impact Assessment** (What systems/users are affected?)\n3. **Immediate Actions** (What should the on-call engineer do RIGHT NOW?)\n4. **Prevention Recommendations** (How to prevent this in the future?)\n\nFormat your response as markdown. Be specific and actionable. Focus on ML-specific issues (model loading, inference errors, resource constraints)."
+                "text": "You are an expert MLOps Site Reliability Engineer analyzing a production alert for a machine learning model serving system.\n\n**Alert Details:**\n- Alert Name: ${{ inputs.alert_name }}\n- Severity: ${{ inputs.alert_severity }}\n- Pod: ${{ inputs.pod_name }}\n- Namespace: ${{ inputs.namespace }}\n\n**Pod Logs (last 100 lines):**\n${LOGS_ESCAPED}\n\n**Kubernetes Events:**\n${EVENTS_ESCAPED}\n\n**Your Task:**\nProvide a concise markdown analysis with:\n1. **Root Cause Hypothesis** (3 most likely causes, ranked by probability)\n2. **Impact Assessment** (What systems/users are affected?)\n3. **Immediate Actions** (What should the on-call engineer do RIGHT NOW?)\n4. **Prevention Recommendations** (How to prevent this in the future?)\n\nFormat your response as markdown. Be specific and actionable. Focus on ML-specific issues (model loading, inference errors, resource constraints)."
               }]
             }],
             "generationConfig": {
@@ -104,71 +96,91 @@ jobs:
           }
           EOF
           
-          # Call Gemini API
+          # Call Gemini API using REST endpoint
           ANALYSIS=$(curl -s -X POST \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -H "Content-Type: application/json" \
             "https://us-central1-aiplatform.googleapis.com/v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/publishers/google/models/gemini-2.5-flash-lite:generateContent" \
             -d @gemini-request.json | jq -r '.candidates[0].content.parts[0].text // "❌ Gemini API call failed. Check service account permissions."')
-
+          
+          # Save analysis
           echo "$ANALYSIS" > analysis-report.md
+          
+          # Set output for next step
           echo "ANALYSIS<<EOF" >> $GITHUB_OUTPUT
           echo "$ANALYSIS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Post Analysis to GitHub Issue
         uses: actions/github-script@v7
+        env:
+          ANALYSIS_CONTENT: ${{ steps.gemini-analysis.outputs.ANALYSIS }}
+          LOGS_CONTENT: ${{ steps.get-logs.outputs.LOGS }}
+          EVENTS_CONTENT: ${{ steps.get-events.outputs.EVENTS }}
+          ALERT_NAME: ${{ inputs.alert_name }}
+          ALERT_SEVERITY: ${{ inputs.alert_severity }}
+          POD_NAME: ${{ inputs.pod_name }}
+          NAMESPACE: ${{ inputs.namespace }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const analysis = `${{ steps.gemini-analysis.outputs.ANALYSIS }}`;
-            const issueBody = `
-            ## 🚨 Production Alert: ${{ inputs.alert_name }}
+            // Read from environment variables to avoid template literal issues
+            const analysis = process.env.ANALYSIS_CONTENT;
+            const logs = process.env.LOGS_CONTENT;
+            const events = process.env.EVENTS_CONTENT;
+            const alertName = process.env.ALERT_NAME;
+            const severity = process.env.ALERT_SEVERITY;
+            const podName = process.env.POD_NAME;
+            const namespace = process.env.NAMESPACE;
             
-            **Severity:** ${{ inputs.alert_severity }}  
-            **Cluster:** ${{ inputs.cluster }}  
-            **Pod:** \`${{ inputs.pod_name }}\`  
-            **Namespace:** \`${{ inputs.namespace }}\`  
-            **Timestamp:** ${new Date().toISOString()}
-            
-            ---
-            
-            ## 🤖 AI-Generated Analysis
-            
-            ${analysis}
-            
-            ---
-            
-            ## 📋 Raw Data
-            
-            <details>
-            <summary>Pod Logs (last 100 lines)</summary>
-            
-            \`\`\`
-            ${{ steps.get-logs.outputs.LOGS }}
-            \`\`\`
-            </details>
-            
-            <details>
-            <summary>Kubernetes Events</summary>
-            
-            \`\`\`
-            ${{ steps.get-events.outputs.EVENTS }}
-            \`\`\`
-            </details>
-            
-            ---
-            
-            **Alert Source:** Prometheus Alertmanager  
-            **Analysis Engine:** Google Gemini 2.5 Flash Lite
-            `;
+            const issueBody = [
+              `## 🚨 Production Alert: ${alertName}`,
+              '',
+              `**Severity:** ${severity}`,
+              `**Pod:** \`${podName}\``,
+              `**Namespace:** \`${namespace}\``,
+              `**Timestamp:** ${new Date().toISOString()}`,
+              '',
+              '---',
+              '',
+              '## 🤖 AI-Generated Analysis',
+              '',
+              analysis,
+              '',
+              '---',
+              '',
+              '## 📋 Raw Data',
+              '',
+              '<details>',
+              '<summary>Pod Logs (last 100 lines)</summary>',
+              '',
+              '```',
+              logs,
+              '```',
+              '',
+              '</details>',
+              '',
+              '<details>',
+              '<summary>Kubernetes Events</summary>',
+              '',
+              '```',
+              events,
+              '```',
+              '',
+              '</details>',
+              '',
+              '---',
+              '',
+              '**Alert Source:** Prometheus Alertmanager',
+              '**Analysis Engine:** Google Gemini 2.5 Flash Lite'
+            ].join('\n');
             
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[ALERT] ${context.payload.inputs.alert_name} - ${context.payload.inputs.pod_name} (${context.payload.inputs.cluster})`,
+              title: `[ALERT] ${alertName} - ${podName}`,
               body: issueBody,
-              labels: ['production-alert', 'ai-analysis', context.payload.inputs.alert_severity, context.payload.inputs.cluster]
+              labels: ['production-alert', 'ai-analysis', severity]
             });
 
       - name: Upload artifacts
