@@ -6,6 +6,10 @@ on:
     types:
       - completed
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   triage-failure:
     name: AI-Powered Failure Analysis

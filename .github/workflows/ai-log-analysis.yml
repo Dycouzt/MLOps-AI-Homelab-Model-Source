@@ -21,6 +21,10 @@ on:
         default: 'ml-apps'
         type: string
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   analyze-logs:
     name: AI-Powered Log Analysis
