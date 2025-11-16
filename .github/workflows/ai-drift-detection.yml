@@ -24,15 +24,14 @@ jobs:
     steps:
       - name: Fetch MLflow metrics
         id: mlflow-metrics
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
           # Fetch metrics from MLflow API
-          MLFLOW_URI="http://34.145.47.22:30500"  # GCP IP
-          
-          # Get recent runs for the model
-          RUNS=$(curl -s "${MLFLOW_URI}/api/2.0/mlflow/experiments/get-by-name?experiment_name=iris-classification" | jq -r '.experiment.experiment_id')
+          RUNS=$(curl -s "${MLFLOW_TRACKING_URI}/api/2.0/mlflow/experiments/get-by-name?experiment_name=iris-classification" | jq -r '.experiment.experiment_id')
           
           # Get last 10 runs
-          METRICS=$(curl -s "${MLFLOW_URI}/api/2.0/mlflow/runs/search" \
+          METRICS=$(curl -s "${MLFLOW_TRACKING_URI}/api/2.0/mlflow/runs/search" \
             -H "Content-Type: application/json" \
             -d "{\"experiment_ids\":[\"${RUNS}\"],\"max_results\":10,\"order_by\":[\"start_time DESC\"]}" | jq -c '.runs')
           
@@ -70,17 +69,12 @@ jobs:
           BASELINE=${{ inputs.baseline_accuracy }}
           DRIFT=$(echo "scale=4; (($BASELINE - $CURRENT) / $BASELINE) * 100" | bc)
           
-          # Escape metrics for JSON
-          METRICS_ESCAPED=$(echo '${{ steps.mlflow-metrics.outputs.METRICS }}' | jq -Rs .)
-          
-          # Calculate percentages for display
+          # Build prompt text
           CURRENT_PCT=$(echo "scale=2; $CURRENT * 100" | bc)
           BASELINE_PCT=$(echo "scale=2; $BASELINE * 100" | bc)
           
-          # Build prompt text
           PROMPT_TEXT="You are an expert ML model monitoring specialist analyzing model performance degradation.\n\n**Model Drift Alert:**\n- Model: ${{ inputs.model_name }}\n- Current Accuracy: ${CURRENT} (${CURRENT_PCT}%)\n- Baseline Accuracy: ${BASELINE} (${BASELINE_PCT}%)\n- Drift: ${DRIFT}% decrease\n\n**Historical Metrics (last 10 runs):**\n\`\`\`json\n${{ steps.mlflow-metrics.outputs.METRICS }}\n\`\`\`\n\n**Your Task:**\nProvide a markdown analysis with:\n\n1. **Drift Classification:**\n   - Type: Data Drift, Concept Drift, or Model Decay?\n   - Severity: P0 (Critical), P1 (High), P2 (Medium), P3 (Low)?\n\n2. **Root Cause Hypothesis:**\n   - What are the 3 most likely causes?\n   - Which is most probable based on the metric trend?\n\n3. **Recommended Actions:**\n   - Immediate: What should we do RIGHT NOW?\n   - Short-term: Actions for this week\n   - Long-term: How to prevent this?\n\n4. **Retraining Decision:**\n   - Should we retrain immediately? Yes/No/Wait\n   - If yes, what data should we use?\n   - If wait, what threshold should trigger retraining?\n\nBe specific and data-driven. Reference the historical trend. Format as markdown. Keep under 600 words."
           
-          # Create JSON payload for Gemini API
           cat > gemini-request.json << EOF
           {
             "contents": [{
@@ -97,30 +91,41 @@ jobs:
           }
           EOF
           
-          # Call Gemini API using REST endpoint
           ANALYSIS=$(curl -s -X POST \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -H "Content-Type: application/json" \
             "https://us-central1-aiplatform.googleapis.com/v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/publishers/google/models/gemini-2.5-flash-lite:generateContent" \
             -d @gemini-request.json | jq -r '.candidates[0].content.parts[0].text // "❌ Gemini API call failed"')
           
-          # Save analysis
           echo "$ANALYSIS" > drift-analysis.md
-          
-          # Set outputs
           echo "ANALYSIS<<EOF" >> $GITHUB_OUTPUT
           echo "$ANALYSIS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
-          
           echo "DRIFT_PERCENT=$DRIFT" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Issue for Drift Alert
         uses: actions/github-script@v7
+        env:
+          ANALYSIS_CONTENT: ${{ steps.ai-analysis.outputs.ANALYSIS }}
+          DRIFT_PERCENT: ${{ steps.ai-analysis.outputs.DRIFT_PERCENT }}
+          MODEL_NAME: ${{ inputs.model_name }}
+          CURRENT_ACC: ${{ inputs.current_accuracy }}
+          BASELINE_ACC: ${{ inputs.baseline_accuracy }}
+          MLFLOW_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const analysis = `${{ steps.ai-analysis.outputs.ANALYSIS }}`;
-            const driftPercent = `${{ steps.ai-analysis.outputs.DRIFT_PERCENT }}`;
+            // Read from environment variables to avoid template literal issues
+            const analysis = process.env.ANALYSIS_CONTENT;
+            const driftPercent = process.env.DRIFT_PERCENT;
+            const modelName = process.env.MODEL_NAME;
+            const currentAcc = process.env.CURRENT_ACC;
+            const baselineAcc = process.env.BASELINE_ACC;
+            const mlflowUri = process.env.MLFLOW_URI;
+            
+            // Calculate percentages
+            const currentPct = (parseFloat(currentAcc) * 100).toFixed(2);
+            const baselinePct = (parseFloat(baselineAcc) * 100).toFixed(2);
             
             // Determine severity
             let severity = 'P2';
@@ -133,49 +138,49 @@ jobs:
               severityLabel = 'model-drift-high';
             }
             
-            const issueBody = `
-            ## 📉 Model Drift Detected: ${{ inputs.model_name }}
-            
-            **Severity:** ${severity}  
-            **Current Accuracy:** ${{ inputs.current_accuracy }} (${{ github.event.inputs.current_accuracy * 100 }}%)  
-            **Baseline Accuracy:** ${{ inputs.baseline_accuracy }} (${{ github.event.inputs.baseline_accuracy * 100 }}%)  
-            **Drift:** ${driftPercent}% decrease  
-            **Detection Time:** ${new Date().toISOString()}
-            
-            ---
-            
-            ## 🤖 AI-Generated Drift Analysis
-            
-            ${analysis}
-            
-            ---
-            
-            ## 📊 Quick Actions
-            
-            - [ ] Review the AI analysis and root cause hypothesis
-            - [ ] Check recent data quality issues
-            - [ ] Investigate feature distribution changes
-            - [ ] Decide on retraining strategy
-            - [ ] Update monitoring thresholds if needed
-            
-            ---
-            
-            ## 🔗 Resources
-            
-            - [MLflow Experiment](http://YOUR_GCP_IP:30500/#/experiments)
-            - [Model Deployment](https://github.com/${{ github.repository }}/actions)
-            - [Grafana Dashboard](http://YOUR_GCP_IP:30300)
-            
-            ---
-            
-            **Analysis Engine:** Google Gemini 2.0 Flash  
-            **Auto-generated:** ${new Date().toISOString()}
-            `;
+            // Build issue body
+            const issueBody = [
+              `## 📉 Model Drift Detected: ${modelName}`,
+              '',
+              `**Severity:** ${severity}`,
+              `**Current Accuracy:** ${currentAcc} (${currentPct}%)`,
+              `**Baseline Accuracy:** ${baselineAcc} (${baselinePct}%)`,
+              `**Drift:** ${driftPercent}% decrease`,
+              `**Detection Time:** ${new Date().toISOString()}`,
+              '',
+              '---',
+              '',
+              '## 🤖 AI-Generated Drift Analysis',
+              '',
+              analysis,
+              '',
+              '---',
+              '',
+              '## 📊 Quick Actions',
+              '',
+              '- [ ] Review the AI analysis and root cause hypothesis',
+              '- [ ] Check recent data quality issues',
+              '- [ ] Investigate feature distribution changes',
+              '- [ ] Decide on retraining strategy',
+              '- [ ] Update monitoring thresholds if needed',
+              '',
+              '---',
+              '',
+              '## 🔗 Resources',
+              '',
+              `- [MLflow Experiment](${mlflowUri}/#/experiments)`,
+              `- [Model Deployment](https://github.com/${context.repo.owner}/${context.repo.repo}/actions)`,
+              '',
+              '---',
+              '',
+              '**Analysis Engine:** Google Gemini 2.5 Flash Lite',
+              `**Auto-generated:** ${new Date().toISOString()}`
+            ].join('\n');
             
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[MODEL DRIFT] ${severity} - ${{ inputs.model_name }} accuracy dropped ${driftPercent}%`,
+              title: `[MODEL DRIFT] ${severity} - ${modelName} accuracy dropped ${driftPercent}%`,
               body: issueBody,
               labels: ['model-drift', 'ai-analysis', severityLabel, 'ml-ops']
             });
