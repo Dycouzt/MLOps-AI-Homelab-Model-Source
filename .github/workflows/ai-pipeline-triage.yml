@@ -3,8 +3,7 @@ name: AI Pipeline Failure Triage
 on:
   workflow_run:
     workflows: ["ML Model CI/CT/CD Pipeline"]
-    types:
-      - completed
+    types: [completed]
 
 permissions:
   contents: read
@@ -16,138 +15,81 @@ jobs:
     name: AI-Powered Failure Analysis
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
-
     steps:
-      - name: Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      #########################################################
-      # 1. COLLECT WORKFLOW RUN & FAILED JOB METADATA
-      #########################################################
-      - name: Get workflow run details
+      - name: Get workflow run and failed job info
         id: workflow-info
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const runId = context.payload.workflow_run.id;
-
-            // Full run metadata
             const run = await github.rest.actions.getWorkflowRun({
               owner: context.repo.owner,
               repo: context.repo.repo,
               run_id: runId
             });
 
-            // Job list
             const jobs = await github.rest.actions.listJobsForWorkflowRun({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              run_id: runId,
-              filter: "latest"
+              run_id: runId
             });
 
-            const failedJobs = jobs.data.jobs.filter(j => j.conclusion === "failure");
+            const failedJob = jobs.data.jobs.find(job => job.conclusion === 'failure');
+            let logsText = "Could not fetch logs";
 
-            if (failedJobs.length === 0) {
-              core.setFailed("No failed jobs found, but workflow reported failure.");
-              return;
+            if (failedJob) {
+              try {
+                const logs = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  job_id: failedJob.id
+                });
+                // GitHub sometimes returns plain text or zip, handle both
+                logsText = typeof logs.data === 'string' ? logs.data : JSON.stringify(logs.data).substring(0, 5000);
+              } catch (e) {
+                logsText = `Error fetching logs: ${e.message}`;
+              }
             }
-
-            const failedJob = failedJobs[0];
 
             const failureInfo = {
               workflow_name: run.data.name,
               run_url: run.data.html_url,
-              failed_job_id: failedJob.id,
-              failed_job_name: failedJob.name,
-              commit_message: run.data.head_commit?.message || "unknown",
-              commit_sha: run.data.head_sha.substring(0, 7),
-              branch: run.data.head_branch
+              failed_job_name: failedJob?.name || "Unknown",
+              failed_step: failedJob?.steps.find(s => s.conclusion === 'failure')?.name || "Unknown",
+              commit_message: run.data.head_commit?.message || "Unknown",
+              commit_sha: run.data.head_sha?.substring(0,7) || "Unknown",
+              branch: run.data.head_branch || "Unknown",
+              logs: logsText.substring(0,5000)
             };
 
-            core.setOutput("failure_info", JSON.stringify(failureInfo));
-            return failureInfo;
+            core.setOutput('failure_info', JSON.stringify(failureInfo));
 
-      #########################################################
-      # 2. DOWNLOAD JOB LOGS ZIP AND EXTRACT REAL TEXT LOGS
-      #########################################################
-      - name: Extract logs for LLM triage
-        id: extract_logs
-        shell: bash
-        run: |
-          JOB_ID=$(echo '${{ steps.extract_failure_info.outputs.failure_info }}' | jq -r '.failed_job_id')
+      - name: Download artifacts safely
+        id: download-artifacts
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const runId = context.payload.workflow_run.id;
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId
+            });
 
-          OWNER=${GITHUB_REPOSITORY%/*}
-          REPO=${GITHUB_REPOSITORY#*/}
-          URL="https://api.github.com/repos/$OWNER/$REPO/actions/jobs/$JOB_ID/logs"
+            let artifactInfo = {};
+            for (const art of artifacts.data.artifacts) {
+              if (art.name === "bandit-report") artifactInfo.bandit_url = art.archive_download_url;
+              if (art.name === "trivy-results") artifactInfo.trivy_url = art.archive_download_url;
+            }
 
-          mkdir -p logs
+            core.setOutput('artifacts', JSON.stringify(artifactInfo));
 
-          curl -L \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -o logs/joblogs.raw \
-            "$URL"
-
-          # ZIP signature check (hex-based, YAML-safe)
-          if head -c 4 logs/joblogs.raw | xxd -p | grep -q "^504b0304"; then
-            mv logs/joblogs.raw logs/joblogs.zip
-            unzip -q logs/joblogs.zip -d logs/files
-            find logs/files -type f -name "*.txt" -exec cat {} + > combined_logs.txt
-          else
-            cp logs/joblogs.raw combined_logs.txt
-          fi
-
-          head -c 5000 combined_logs.txt > trimmed_logs.txt
-
-          echo "LOGS<<EOF" >> $GITHUB_OUTPUT
-          sed 's/%/%%/g' trimmed_logs.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-
-      #########################################################
-      # 3. HEURISTIC FAILURE CLASSIFIER (ROBUST)
-      #########################################################
-      - name: Classify failure type
-        id: classify
-        run: |
-          LOGS="${{ steps.download-logs.outputs.LOGS }}"
-          JOB_NAME=$(echo '${{ steps.workflow-info.outputs.failure_info }}' | jq -r '.failed_job_name')
-
-          # Default
-          FAILURE_TYPE="Pipeline Failure"
-          PROMPT_CONTEXT="You are a DevOps/MLOps engineer. A CI/CD pipeline step failed."
-
-          # Model training job name (your actual job: "Continuous Training")
-          if [[ "$JOB_NAME" == *"Continuous Training"* ]] || echo "$LOGS" | grep -qi "Traceback"; then
-            FAILURE_TYPE="Model Training"
-            PROMPT_CONTEXT="You are an ML engineer. Model training or validation failed."
-          fi
-
-          # Python import/runtime errors
-          if echo "$LOGS" | grep -qi "ModuleNotFoundError"; then
-            FAILURE_TYPE="Model Training (Python Import Error)"
-            PROMPT_CONTEXT="You are an ML engineer. A Python import error occurred during model training."
-          fi
-
-          # Security scans
-          if [[ "$JOB_NAME" == *"Bandit"* ]] || echo "$LOGS" | grep -qi "BANDIT"; then
-            FAILURE_TYPE="Security Scan (SAST)"
-            PROMPT_CONTEXT="You are a DevSecOps specialist. A SAST security scan failed."
-          fi
-
-          # Container scans
-          if echo "$LOGS" | grep -qi "TRIVY"; then
-            FAILURE_TYPE="Container Security Scan"
-            PROMPT_CONTEXT="You are a DevSecOps specialist. A container image scan failed."
-          fi
-
-          echo "FAILURE_TYPE=$FAILURE_TYPE" >> $GITHUB_OUTPUT
-          echo "PROMPT_CONTEXT=$PROMPT_CONTEXT" >> $GITHUB_OUTPUT
-
-      #########################################################
-      # 4. CALL GEMINI (UNCHANGED FORMAT, CLEAN CONTEXT)
-      #########################################################
       - name: Analyze failure with Gemini AI
         id: ai-analysis
         run: |
@@ -159,39 +101,24 @@ jobs:
           gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
 
           ACCESS_TOKEN=$(gcloud auth print-access-token)
-
           FAILURE_INFO='${{ steps.workflow-info.outputs.failure_info }}'
-          FAILURE_TYPE='${{ steps.classify.outputs.FAILURE_TYPE }}'
-          PROMPT_CONTEXT='${{ steps.classify.outputs.PROMPT_CONTEXT }}'
-          LOGS="${{ steps.download-logs.outputs.LOGS }}"
+          FAILED_JOB=$(echo $FAILURE_INFO | jq -r '.failed_job_name')
 
-          WF=$(echo $FAILURE_INFO | jq -r '.workflow_name')
-          JOB=$(echo $FAILURE_INFO | jq -r '.failed_job_name')
-          BRANCH=$(echo $FAILURE_INFO | jq -r '.branch')
-          SHA=$(echo $FAILURE_INFO | jq -r '.commit_sha')
-          MSG=$(echo $FAILURE_INFO | jq -r '.commit_message')
+          if [[ "$FAILED_JOB" == *"SAST"* ]] || [[ "$FAILED_JOB" == *"Bandit"* ]]; then
+            FAILURE_TYPE="Security Scan (SAST)"
+            PROMPT_CONTEXT="You are a DevSecOps security specialist. A SAST security scan failed."
+          elif [[ "$FAILED_JOB" == *"train"* ]] || [[ "$FAILED_JOB" == *"Training"* ]]; then
+            FAILURE_TYPE="Model Training"
+            PROMPT_CONTEXT="You are an ML engineer. Model training or validation failed."
+          elif [[ "$FAILED_JOB" == *"test"* ]]; then
+            FAILURE_TYPE="Unit Tests"
+            PROMPT_CONTEXT="You are a Python testing expert. Unit tests failed."
+          else
+            FAILURE_TYPE="Pipeline Failure"
+            PROMPT_CONTEXT="You are a DevOps/MLOps engineer. A CI/CD pipeline step failed."
+          fi
 
-          PROMPT_TEXT="${PROMPT_CONTEXT}
-
-          **Pipeline Failure Details:**
-          - Workflow: ${WF}
-          - Failed Job: ${JOB}
-          - Failure Type: ${FAILURE_TYPE}
-          - Branch: ${BRANCH}
-          - Commit: ${SHA} - ${MSG}
-
-          **Logs (excerpt):**
-          \`\`\`
-          ${LOGS}
-          \`\`\`
-
-          **Your Task:**
-          Provide a markdown analysis with:
-          1. Root Cause  
-          2. Risk Assessment  
-          3. Fix Instructions (specific commands/code)  
-          4. Prevention Steps  
-          "
+          PROMPT_TEXT="${PROMPT_CONTEXT}\n\n**Pipeline Failure Details:**\n- Workflow: $(echo $FAILURE_INFO | jq -r '.workflow_name')\n- Failed Job: $(echo $FAILURE_INFO | jq -r '.failed_job_name')\n- Failed Step: $(echo $FAILURE_INFO | jq -r '.failed_step')\n- Branch: $(echo $FAILURE_INFO | jq -r '.branch')\n- Commit: $(echo $FAILURE_INFO | jq -r '.commit_sha') - $(echo $FAILURE_INFO | jq -r '.commit_message')\n\n**Logs (excerpt):**\n\`\`\`\n$(echo $FAILURE_INFO | jq -r '.logs')\n\`\`\`\n\n**Your Task:**\nProvide a markdown analysis with:\n1. **Root Cause** (What exactly caused the failure?)\n2. **Risk Assessment** (Is this a blocker?)\n3. **Fix Instructions** (Step-by-step with specific commands/code)\n4. **Prevention** (How to avoid this?)\n\nBe specific and actionable. Keep under 500 words."
 
           cat > gemini-request.json << EOF
           {
@@ -216,71 +143,78 @@ jobs:
             -d @gemini-request.json | jq -r '.candidates[0].content.parts[0].text // "❌ Gemini API call failed"')
 
           echo "$ANALYSIS" > triage-report.md
-
           echo "ANALYSIS<<EOF" >> $GITHUB_OUTPUT
-          echo "$ANALYSIS" >> $GITHUB_OUTPUT
+          echo "$ANALYSIS" | sed 's/%/%%/g' >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+          echo "FAILURE_TYPE=$FAILURE_TYPE" >> $GITHUB_OUTPUT
 
-      #########################################################
-      # 5. ISSUE CREATION
-      #########################################################
-      - name: Create GitHub Issue with Triage Report
+      - name: Create GitHub Issue
         uses: actions/github-script@v7
         env:
           ANALYSIS_CONTENT: ${{ steps.ai-analysis.outputs.ANALYSIS }}
-          FAILURE_TYPE: ${{ steps.classify.outputs.FAILURE_TYPE }}
+          FAILURE_TYPE: ${{ steps.ai-analysis.outputs.FAILURE_TYPE }}
           FAILURE_INFO: ${{ steps.workflow-info.outputs.failure_info }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const analysis = process.env.ANALYSIS_CONTENT;
-            const failureInfo = JSON.parse(process.env.FAILURE_INFO);
             const failureType = process.env.FAILURE_TYPE;
+            const failureInfo = JSON.parse(process.env.FAILURE_INFO);
 
-            let severity = "pipeline-failure";
-            if (failureType.includes("Security")) severity = "security-issue";
-            if (failureType.includes("Training")) severity = "ml-model-issue";
+            let severityLabel = 'pipeline-failure';
+            if (failureType.includes('Security')) severityLabel = 'security-issue';
+            if (failureType.includes('Training')) severityLabel = 'ml-model-issue';
 
-            const body = `
-            ## Pipeline Failure: ${failureInfo.failed_job_name}
+            const issueBody = [
+              `## 🔴 Pipeline Failure: ${failureInfo.failed_job_name}`,
+              '',
+              `**Failure Type:** ${failureType}`,
+              `**Branch:** \`${failureInfo.branch}\``,
+              `**Commit:** ${failureInfo.commit_sha} - ${failureInfo.commit_message}`,
+              `**Workflow Run:** ${failureInfo.run_url}`,
+              '',
+              '---',
+              '',
+              '## 🤖 AI-Generated Triage Analysis',
+              '',
+              analysis,
+              '',
+              '---',
+              '',
+              '## 📋 Quick Actions',
+              '',
+              '- [ ] Review the AI analysis',
+              '- [ ] Apply the suggested fix',
+              '- [ ] Test locally before pushing',
+              '',
+              '---',
+              '',
+              '<details>',
+              '<summary>📊 View Full Logs</summary>',
+              '',
+              '```',
+              failureInfo.logs,
+              '```',
+              '',
+              '</details>',
+              '',
+              '---',
+              '',
+              '**Triage Engine:** Google Gemini 2.5 Flash Lite',
+              `**Auto-generated:** ${new Date().toISOString()}`
+            ].join('\n');
 
-            **Failure Type:** ${failureType}  
-            **Branch:** \`${failureInfo.branch}\`  
-            **Commit:** ${failureInfo.commit_sha} - ${failureInfo.commit_message}  
-            **Workflow Run:** ${failureInfo.run_url}
-
-            ---
-
-            ## AI Triage Analysis
-
-            ${analysis}
-
-            ---
-
-            ## Full Logs
-            \`\`\`
-            ${analysis}
-            \`\`\`
-
-            ---
-
-            Triage Engine: Gemini 2.5 Flash Lite  
-            Auto-generated: ${new Date().toISOString()}
-            `;
-
-            github.rest.issues.create({
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `[PIPELINE FAILURE] ${failureType} - ${failureInfo.commit_sha}`,
-              body: body,
-              labels: ['ai-triage', severity]
+              body: issueBody,
+              labels: ['pipeline-failure', 'ai-triage', severityLabel]
             });
 
-      #########################################################
-      # 6. UPLOAD TRIAGE REPORT
-      #########################################################
       - name: Upload triage report
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: ai-triage-report
           path: triage-report.md
