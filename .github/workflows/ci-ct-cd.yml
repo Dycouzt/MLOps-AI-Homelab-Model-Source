@@ -118,15 +118,8 @@ jobs:
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
-          set -o pipefail
-          python train.py 2>&1 | tee train.log
+          python train.py
           echo "MODEL_TRAINED=true" >> $GITHUB_ENV
-      
-      - name: Upload training logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: train-logs
-          path: train.log
 
       - name: Upload model artifact
         uses: actions/upload-artifact@v4
