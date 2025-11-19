@@ -77,7 +77,7 @@ jobs:
         shell: bash
         run: |
           JOB_ID=$(echo '${{ steps.extract_failure_info.outputs.failure_info }}' | jq -r '.failed_job_id')
-          
+
           OWNER=${GITHUB_REPOSITORY%/*}
           REPO=${GITHUB_REPOSITORY#*/}
           URL="https://api.github.com/repos/$OWNER/$REPO/actions/jobs/$JOB_ID/logs"
@@ -89,17 +89,15 @@ jobs:
             -o logs/joblogs.raw \
             "$URL"
 
-          # Check if file is actually a ZIP (starts with "PK\x03\x04")
-          if head -c 4 logs/joblogs.raw | grep -q "PK"; then
+          # ZIP signature check (hex-based, YAML-safe)
+          if head -c 4 logs/joblogs.raw | xxd -p | grep -q "^504b0304"; then
             mv logs/joblogs.raw logs/joblogs.zip
             unzip -q logs/joblogs.zip -d logs/files
             find logs/files -type f -name "*.txt" -exec cat {} + > combined_logs.txt
           else
-            # Not a ZIP → treat as raw log stream
             cp logs/joblogs.raw combined_logs.txt
           fi
 
-          # Truncate to avoid LLM context overflow
           head -c 5000 combined_logs.txt > trimmed_logs.txt
 
           echo "LOGS<<EOF" >> $GITHUB_OUTPUT
