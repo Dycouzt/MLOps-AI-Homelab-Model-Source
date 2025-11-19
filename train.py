@@ -111,6 +111,4 @@ def train_model():
 if __name__ == "__main__":
     print("Starting model training pipeline...")
     accuracy, model = train_model()
-    print(f"\n🎉 Training completed successfully! Final accuracy: {accuracy:.4f}")
-
-import nonexistent_module_that_does_not_exist
+    print(f"\n🎉 Training completed successfully! Final accuracy: {accuracy:.4f}") import nonexistent_module_that_does_not_exist
