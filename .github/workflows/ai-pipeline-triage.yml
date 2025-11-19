@@ -20,18 +20,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Get workflow run details and extract logs
+      - name: Get workflow run details and logs
         id: workflow-info
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const fs = require('fs');
-            const path = require('path');
-            const { exec } = require('child_process');
-            const util = require('util');
-            const execPromise = util.promisify(exec);
-            
             const runId = context.payload.workflow_run.id;
             
             // Get workflow run details
@@ -51,105 +45,81 @@ jobs:
             
             const failedJobs = jobs.data.jobs.filter(job => job.conclusion === 'failure');
             
-            let failureLogs = 'No logs available';
+            let failureLogs = 'No detailed logs available';
             let failedStepName = 'Unknown';
+            let failedStepLogs = '';
             
             if (failedJobs.length > 0) {
               const failedJob = failedJobs[0];
-              const jobId = failedJob.id;
               
-              // Find the failed step
+              // Find the failed step and extract its output from the job
               const failedStep = failedJob.steps.find(s => s.conclusion === 'failure');
               if (failedStep) {
                 failedStepName = failedStep.name;
-              }
-              
-              try {
-                // Download logs as ZIP
-                const logsUrl = await github.rest.actions.downloadJobLogsForWorkflowRun({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  job_id: jobId
-                });
                 
-                // Fetch the ZIP file
-                const response = await fetch(logsUrl.url);
-                const buffer = await response.arrayBuffer();
+                // Build logs from step information and job annotations
+                let logParts = [];
                 
-                // Save ZIP file
-                const zipPath = path.join(process.env.GITHUB_WORKSPACE, 'logs.zip');
-                fs.writeFileSync(zipPath, Buffer.from(buffer));
+                // Add step information
+                logParts.push(`Failed Step: ${failedStep.name}`);
+                logParts.push(`Step Number: ${failedStep.number}`);
+                logParts.push(`Started: ${failedStep.started_at}`);
+                logParts.push(`Completed: ${failedStep.completed_at}`);
+                logParts.push('---');
                 
-                // Extract ZIP file
-                const extractDir = path.join(process.env.GITHUB_WORKSPACE, 'logs');
-                fs.mkdirSync(extractDir, { recursive: true });
-                
-                await execPromise(`unzip -q "${zipPath}" -d "${extractDir}"`);
-                
-                // Read all log files and concatenate
-                const logFiles = fs.readdirSync(extractDir);
-                let allLogs = [];
-                
-                for (const file of logFiles) {
-                  const logPath = path.join(extractDir, file);
-                  if (fs.statSync(logPath).isFile()) {
-                    const content = fs.readFileSync(logPath, 'utf8');
-                    allLogs.push(`\n=== ${file} ===\n${content}`);
-                  }
-                }
-                
-                // Combine all logs
-                const fullLogs = allLogs.join('\n');
-                
-                // Extract error messages (Python tracebacks, error lines, etc.)
-                const errorPatterns = [
-                  /^.*Error:.*$/gm,
-                  /^.*Exception:.*$/gm,
-                  /^.*Traceback.*$/gm,
-                  /^.*File ".*", line \d+.*$/gm,
-                  /^.*ModuleNotFoundError.*$/gm,
-                  /^.*ImportError.*$/gm,
-                  /^.*FAILED.*$/gm,
-                  /^.*failed.*$/gmi
-                ];
-                
-                let relevantLogs = [];
-                for (const pattern of errorPatterns) {
-                  const matches = fullLogs.match(pattern);
-                  if (matches) {
-                    relevantLogs.push(...matches);
-                  }
-                }
-                
-                // If we found error lines, use them; otherwise use last 200 lines
-                if (relevantLogs.length > 0) {
-                  // Get context around errors (10 lines before and after each error)
-                  const lines = fullLogs.split('\n');
-                  let contextLines = new Set();
-                  
-                  relevantLogs.forEach(errorLine => {
-                    const index = lines.indexOf(errorLine);
-                    if (index !== -1) {
-                      for (let i = Math.max(0, index - 10); i < Math.min(lines.length, index + 10); i++) {
-                        contextLines.add(lines[i]);
-                      }
-                    }
+                // Get annotations (these often contain error messages)
+                try {
+                  const annotations = await github.rest.checks.listAnnotations({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    check_run_id: failedJob.id
                   });
                   
-                  failureLogs = Array.from(contextLines).join('\n');
-                } else {
-                  // Fallback: last 200 lines
-                  const lines = fullLogs.split('\n');
-                  failureLogs = lines.slice(-200).join('\n');
+                  if (annotations.data && annotations.data.length > 0) {
+                    logParts.push('ERROR ANNOTATIONS:');
+                    annotations.data.forEach(ann => {
+                      logParts.push(`[${ann.annotation_level}] ${ann.path}:${ann.start_line}`);
+                      logParts.push(ann.message);
+                      logParts.push('---');
+                    });
+                  }
+                } catch (e) {
+                  logParts.push(`Could not fetch annotations: ${e.message}`);
                 }
                 
-                // Limit to 8000 characters for Gemini
-                if (failureLogs.length > 8000) {
-                  failureLogs = failureLogs.substring(failureLogs.length - 8000);
-                }
+                // Add job conclusion
+                logParts.push(`Job Conclusion: ${failedJob.conclusion}`);
+                logParts.push(`Job Status: ${failedJob.status}`);
                 
-              } catch (error) {
-                failureLogs = `Error extracting logs: ${error.message}\n\nJob details: ${JSON.stringify(failedJob, null, 2)}`;
+                failedStepLogs = logParts.join('\n');
+              }
+              
+              // Build comprehensive log info from available data
+              let comprehensiveLogs = [];
+              
+              comprehensiveLogs.push('=== WORKFLOW FAILURE DETAILS ===');
+              comprehensiveLogs.push(`Workflow: ${run.data.name}`);
+              comprehensiveLogs.push(`Run URL: ${run.data.html_url}`);
+              comprehensiveLogs.push(`Conclusion: ${run.data.conclusion}`);
+              comprehensiveLogs.push('');
+              comprehensiveLogs.push('=== FAILED JOB DETAILS ===');
+              comprehensiveLogs.push(`Job Name: ${failedJob.name}`);
+              comprehensiveLogs.push(`Job ID: ${failedJob.id}`);
+              comprehensiveLogs.push(`Runner: ${failedJob.runner_name || 'N/A'}`);
+              comprehensiveLogs.push('');
+              comprehensiveLogs.push('=== FAILED STEP INFORMATION ===');
+              comprehensiveLogs.push(failedStepLogs);
+              comprehensiveLogs.push('');
+              comprehensiveLogs.push('=== ALL STEPS STATUS ===');
+              failedJob.steps.forEach(step => {
+                comprehensiveLogs.push(`[${step.conclusion || 'RUNNING'}] Step ${step.number}: ${step.name}`);
+              });
+              
+              failureLogs = comprehensiveLogs.join('\n');
+              
+              // Limit size
+              if (failureLogs.length > 6000) {
+                failureLogs = failureLogs.substring(0, 6000) + '\n... (truncated)';
               }
             }
             
@@ -157,6 +127,7 @@ jobs:
               workflow_name: run.data.name,
               run_url: run.data.html_url,
               failed_job_name: failedJobs.length > 0 ? failedJobs[0].name : 'Unknown',
+              failed_job_url: failedJobs.length > 0 ? failedJobs[0].html_url : run.data.html_url,
               failed_step: failedStepName,
               commit_message: run.data.head_commit.message,
               commit_sha: run.data.head_sha.substring(0, 7),
@@ -191,26 +162,29 @@ jobs:
           
           if [[ "$FAILED_JOB" == *"SAST"* ]] || [[ "$FAILED_JOB" == *"Bandit"* ]]; then
             FAILURE_TYPE="Security Scan (SAST)"
-            PROMPT_CONTEXT="You are a DevSecOps security specialist analyzing a SAST security scan failure."
+            PROMPT_CONTEXT="You are a DevSecOps security specialist. The SAST scan failed."
           elif [[ "$FAILED_JOB" == *"train"* ]] || [[ "$FAILED_JOB" == *"Training"* ]] || [[ "$FAILED_STEP" == *"Train"* ]]; then
             FAILURE_TYPE="Model Training/Validation"
-            PROMPT_CONTEXT="You are an ML engineer analyzing a model training or validation failure."
+            PROMPT_CONTEXT="You are an ML engineer. Model training failed. Common causes: import errors, missing dependencies, accuracy below threshold, data issues."
           elif [[ "$FAILED_JOB" == *"test"* ]] || [[ "$FAILED_STEP" == *"test"* ]]; then
             FAILURE_TYPE="Unit Tests"
-            PROMPT_CONTEXT="You are a Python testing expert analyzing unit test failures."
+            PROMPT_CONTEXT="You are a Python expert. Unit tests failed."
           elif [[ "$FAILED_JOB" == *"Container"* ]] || [[ "$FAILED_JOB" == *"Trivy"* ]]; then
-            FAILURE_TYPE="Container Security Scan"
-            PROMPT_CONTEXT="You are a DevSecOps specialist analyzing container vulnerability scan failures."
+            FAILURE_TYPE="Container Security"
+            PROMPT_CONTEXT="You are a DevSecOps specialist. Container scan failed."
           elif [[ "$FAILED_STEP" == *"Lint"* ]] || [[ "$FAILED_STEP" == *"flake8"* ]]; then
-            FAILURE_TYPE="Code Quality/Linting"
-            PROMPT_CONTEXT="You are a Python code quality expert analyzing linting failures."
+            FAILURE_TYPE="Code Quality"
+            PROMPT_CONTEXT="You are a code quality expert. Linting failed."
           else
             FAILURE_TYPE="Pipeline Failure"
-            PROMPT_CONTEXT="You are a DevOps/MLOps engineer analyzing a CI/CD pipeline failure."
+            PROMPT_CONTEXT="You are a DevOps engineer. The pipeline failed."
           fi
           
+          # Extract job URL for user to view full logs
+          JOB_URL=$(echo $FAILURE_INFO | jq -r '.failed_job_url')
+          
           # Build prompt
-          PROMPT_TEXT="${PROMPT_CONTEXT}\n\n**Pipeline Failure Details:**\n- Workflow: $(echo $FAILURE_INFO | jq -r '.workflow_name')\n- Failed Job: $(echo $FAILURE_INFO | jq -r '.failed_job_name')\n- Failed Step: $(echo $FAILURE_INFO | jq -r '.failed_step')\n- Branch: $(echo $FAILURE_INFO | jq -r '.branch')\n- Commit: $(echo $FAILURE_INFO | jq -r '.commit_sha') - $(echo $FAILURE_INFO | jq -r '.commit_message')\n\n**Extracted Error Logs:**\n\`\`\`\n$(echo $FAILURE_INFO | jq -r '.logs')\n\`\`\`\n\n**Your Task:**\nAnalyze the ACTUAL error messages and stack traces in the logs above. Provide:\n\n1. **Root Cause** - What EXACTLY caused the failure based on the error messages?\n2. **Risk Assessment** - Is this a blocker or can it be ignored?\n3. **Fix Instructions** - Specific code changes or commands to fix this\n4. **Prevention** - How to avoid this in the future?\n\nFocus on the actual Python errors, tracebacks, and failure messages. Ignore warnings unless they're the direct cause. Be specific with file names and line numbers from the logs. Keep under 500 words."
+          PROMPT_TEXT="${PROMPT_CONTEXT}\n\n**Failure Summary:**\n- Job: $(echo $FAILURE_INFO | jq -r '.failed_job_name')\n- Step: $(echo $FAILURE_INFO | jq -r '.failed_step')\n- Commit: $(echo $FAILURE_INFO | jq -r '.commit_sha') - $(echo $FAILURE_INFO | jq -r '.commit_message')\n\n**Available Information:**\n$(echo $FAILURE_INFO | jq -r '.logs')\n\n**Important:** The detailed logs are at: ${JOB_URL}\n\n**Your Task:**\nBased on the failure type (${FAILURE_TYPE}) and available information, provide:\n\n1. **Most Likely Root Cause** - What probably caused this? (e.g., missing import, wrong dependency, syntax error)\n2. **Recommended Fix** - Specific action to take\n3. **How to Verify** - Command to test the fix locally\n4. **Prevention** - How to avoid this\n\nBe concise. If you don't have enough error details, say so and guide the user to check the full logs at the job URL. Keep under 400 words."
           
           # Create JSON payload
           cat > gemini-request.json << EOF
@@ -222,8 +196,8 @@ jobs:
               }]
             }],
             "generationConfig": {
-              "temperature": 0.2,
-              "maxOutputTokens": 1024,
+              "temperature": 0.3,
+              "maxOutputTokens": 800,
               "topP": 0.95
             }
           }
@@ -269,11 +243,12 @@ jobs:
               `**Failed Step:** ${failureInfo.failed_step}`,
               `**Branch:** \`${failureInfo.branch}\``,
               `**Commit:** ${failureInfo.commit_sha} - ${failureInfo.commit_message}`,
-              `**Workflow Run:** ${failureInfo.run_url}`,
+              '',
+              `**🔗 [View Full Logs](${failureInfo.failed_job_url})**`,
               '',
               '---',
               '',
-              '## 🤖 AI-Generated Triage Analysis',
+              '## 🤖 AI-Generated Triage',
               '',
               analysis,
               '',
@@ -281,15 +256,15 @@ jobs:
               '',
               '## 📋 Quick Actions',
               '',
-              '- [ ] Review the AI analysis above',
+              '- [ ] Review the AI analysis',
+              '- [ ] Check the full logs link above for details',
               '- [ ] Apply the suggested fix',
-              '- [ ] Test locally before pushing',
-              '- [ ] Update tests/configs if needed',
+              '- [ ] Test locally',
               '',
               '---',
               '',
               '<details>',
-              '<summary>📊 View Extracted Error Logs</summary>',
+              '<summary>📊 Workflow Details</summary>',
               '',
               '```',
               failureInfo.logs,
@@ -299,7 +274,7 @@ jobs:
               '',
               '---',
               '',
-              '**Triage Engine:** Google Gemini 2.5 Flash Lite',
+              '**Analysis Engine:** Google Gemini 2.5 Flash Lite  ',
               `**Auto-generated:** ${new Date().toISOString()}`
             ].join('\n');
             
