@@ -118,7 +118,7 @@ jobs:
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
-          # Capture both stdout and stderr into a log file
+          set -o pipefail
           python train.py 2>&1 | tee train.log
           echo "MODEL_TRAINED=true" >> $GITHUB_ENV
       
