@@ -113,3 +113,4 @@ if __name__ == "__main__":
     accuracy, model = train_model()
     print(f"\n🎉 Training completed successfully! Final accuracy: {accuracy:.4f}")
     
+import nonexistent_module_that_does_not_exist
