@@ -72,28 +72,40 @@ jobs:
       #########################################################
       # 2. DOWNLOAD JOB LOGS ZIP AND EXTRACT REAL TEXT LOGS
       #########################################################
-      - name: Download job logs
-        id: download-logs
+      - name: Extract logs for LLM triage
+        id: extract_logs
+        shell: bash
         run: |
-          JOB_ID=$(echo '${{ steps.workflow-info.outputs.failure_info }}' | jq -r '.failed_job_id')
-          OWNER=${{ github.repository_owner }}
-          REPO=$(echo "${GITHUB_REPOSITORY#*/}")
-
+          JOB_ID=$(echo '${{ steps.extract_failure_info.outputs.failure_info }}' | jq -r '.failed_job_id')
+          
+          OWNER=${GITHUB_REPOSITORY%/*}
+          REPO=${GITHUB_REPOSITORY#*/}
           URL="https://api.github.com/repos/$OWNER/$REPO/actions/jobs/$JOB_ID/logs"
 
-          mkdir logs
-          curl -L -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" -o logs/joblogs.zip "$URL"
-          unzip logs/joblogs.zip -d logs
+          mkdir -p logs
 
-          # Flatten all step logs into a single file
-          find logs -type f -name "*.txt" -exec cat {} + > combined_logs.txt
+          curl -L \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -o logs/joblogs.raw \
+            "$URL"
 
-          # Robust truncation to avoid exceeding LLM input limits
+          # Check if file is actually a ZIP (starts with "PK\x03\x04")
+          if head -c 4 logs/joblogs.raw | grep -q "PK"; then
+            mv logs/joblogs.raw logs/joblogs.zip
+            unzip -q logs/joblogs.zip -d logs/files
+            find logs/files -type f -name "*.txt" -exec cat {} + > combined_logs.txt
+          else
+            # Not a ZIP → treat as raw log stream
+            cp logs/joblogs.raw combined_logs.txt
+          fi
+
+          # Truncate to avoid LLM context overflow
           head -c 5000 combined_logs.txt > trimmed_logs.txt
 
           echo "LOGS<<EOF" >> $GITHUB_OUTPUT
           sed 's/%/%%/g' trimmed_logs.txt >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
 
       #########################################################
       # 3. HEURISTIC FAILURE CLASSIFIER (ROBUST)
