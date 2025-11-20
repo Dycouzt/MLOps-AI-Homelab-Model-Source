@@ -54,7 +54,7 @@ jobs:
           else
             echo "Configuring kubectl for k3d cluster..."
             echo "${{ secrets.KUBECONFIG_K3D }}" | base64 -d > ~/.kube/config
-            kubectl config use-context k3d-ml-worker
+            kubectl config use-context k3d
           fi
           
           # Verify connection
