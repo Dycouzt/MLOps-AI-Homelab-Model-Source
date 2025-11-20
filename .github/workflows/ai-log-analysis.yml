@@ -43,6 +43,18 @@ jobs:
         with:
           version: 'latest'
 
+
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Connect GitHub runner to Tailscale
+        run: |
+          sudo tailscale up \
+            --authkey=${{ secrets.TS_KEY }} \
+            --accept-routes=true \
+            --hostname="gha-aiops-$(date +%s)"
+
       - name: Configure kubectl for target cluster
         run: |
           mkdir -p ~/.kube
