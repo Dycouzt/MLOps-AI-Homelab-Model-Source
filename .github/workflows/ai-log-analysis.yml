@@ -3,6 +3,13 @@ name: AI Log Analysis - Production Alert Handler
 on:
   workflow_dispatch:
     inputs:
+      cluster:
+        description: 'Cluster name (gcp/k3d)'
+        required: true
+        type: choice
+        options:
+          - gcp
+          - k3d
       alert_name:
         description: 'Alert name from Prometheus'
         required: true
@@ -24,6 +31,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: read
 
 jobs:
   analyze-logs:
@@ -35,61 +43,161 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Configure kubectl for GCP cluster
+      - name: Configure kubectl for target cluster
         run: |
           mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG_GCP }}" | base64 -d > ~/.kube/config
-          kubectl config use-context gcp
+          
+          if [ "${{ inputs.cluster }}" == "gcp" ]; then
+            echo "Configuring kubectl for GCP cluster..."
+            echo "${{ secrets.KUBECONFIG_GCP }}" | base64 -d > ~/.kube/config
+            kubectl config use-context gcp
+          else
+            echo "Configuring kubectl for k3d cluster..."
+            echo "${{ secrets.KUBECONFIG_K3D }}" | base64 -d > ~/.kube/config
+            kubectl config use-context k3d-ml-worker
+          fi
+          
+          # Verify connection
+          echo "Testing cluster connection..."
+          kubectl cluster-info
+          kubectl get nodes
 
       - name: Fetch pod logs
         id: get-logs
         run: |
-          echo "Fetching logs for pod: ${{ inputs.pod_name }}"
-          LOG_OUTPUT=$(kubectl logs ${{ inputs.pod_name }} -n ${{ inputs.namespace }} --tail=100 2>&1 || echo "Failed to fetch logs")
+          echo "Fetching logs for pod: ${{ inputs.pod_name }} in namespace: ${{ inputs.namespace }}"
           
-          # Save logs to file for artifact upload
+          # Check if pod exists first
+          if ! kubectl get pod ${{ inputs.pod_name }} -n ${{ inputs.namespace }} &>/dev/null; then
+            echo "⚠️ Pod not found, fetching available pods..."
+            AVAILABLE_PODS=$(kubectl get pods -n ${{ inputs.namespace }} -o name)
+            LOG_OUTPUT="Pod '${{ inputs.pod_name }}' not found in namespace '${{ inputs.namespace }}'.\n\nAvailable pods:\n${AVAILABLE_PODS}\n\nThis might be a stale alert or the pod was already restarted."
+          else
+            # Pod exists, fetch logs
+            LOG_OUTPUT=$(kubectl logs ${{ inputs.pod_name }} -n ${{ inputs.namespace }} --tail=100 2>&1 || echo "Failed to fetch logs")
+          fi
+          
+          # Save logs to file
           echo "$LOG_OUTPUT" > pod-logs.txt
           
-          # Escape logs for JSON (remove newlines, escape quotes)
-          LOG_ESCAPED=$(echo "$LOG_OUTPUT" | jq -Rs .)
-          echo "LOGS=$LOG_ESCAPED" >> $GITHUB_OUTPUT
+          # Set output (escape for GitHub Actions)
+          echo "LOGS<<EOF" >> $GITHUB_OUTPUT
+          echo "$LOG_OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Get pod events
         id: get-events
         run: |
           echo "Fetching events for pod: ${{ inputs.pod_name }}"
-          EVENTS=$(kubectl get events -n ${{ inputs.namespace }} --field-selector involvedObject.name=${{ inputs.pod_name }} --sort-by='.lastTimestamp' 2>&1 || echo "No events found")
+          
+          # Get events for the specific pod
+          EVENTS=$(kubectl get events -n ${{ inputs.namespace }} \
+            --field-selector involvedObject.name=${{ inputs.pod_name }} \
+            --sort-by='.lastTimestamp' 2>&1 || echo "No events found")
+          
+          # If no specific events, get recent namespace events
+          if [[ "$EVENTS" == *"No resources found"* ]]; then
+            echo "No pod-specific events, fetching recent namespace events..."
+            EVENTS=$(kubectl get events -n ${{ inputs.namespace }} \
+              --sort-by='.lastTimestamp' \
+              --limit=20 2>&1 || echo "No events available")
+          fi
           
           echo "$EVENTS" > pod-events.txt
-          EVENTS_ESCAPED=$(echo "$EVENTS" | jq -Rs .)
-          echo "EVENTS=$EVENTS_ESCAPED" >> $GITHUB_OUTPUT
+          
+          echo "EVENTS<<EOF" >> $GITHUB_OUTPUT
+          echo "$EVENTS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Get pod description (if exists)
+        id: get-description
+        continue-on-error: true
+        run: |
+          echo "Getting pod description..."
+          POD_DESC=$(kubectl describe pod ${{ inputs.pod_name }} -n ${{ inputs.namespace }} 2>&1 || echo "Pod description not available")
+          
+          echo "DESCRIPTION<<EOF" >> $GITHUB_OUTPUT
+          echo "$POD_DESC" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: AI Analysis with Gemini
         id: gemini-analysis
         run: |
-          # Install Google Cloud SDK
+          echo "Installing Google Cloud SDK..."
           curl https://sdk.cloud.google.com | bash -s -- --disable-prompts
           source $HOME/google-cloud-sdk/path.bash.inc
           
-          # Authenticate with service account
+          echo "Authenticating with GCP..."
           echo "${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}" | base64 -d > /tmp/gcp-key.json
+          
+          # Verify the key file is valid JSON
+          if ! jq empty /tmp/gcp-key.json 2>/dev/null; then
+            echo "❌ Invalid service account key JSON"
+            exit 1
+          fi
+          
           gcloud auth activate-service-account --key-file=/tmp/gcp-key.json
           gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
           
-          # Get access token
+          echo "Getting access token..."
           ACCESS_TOKEN=$(gcloud auth print-access-token)
           
-          # Escape logs and events for JSON
-          LOGS_ESCAPED=$(echo '${{ steps.get-logs.outputs.LOGS }}' | jq -Rs .)
-          EVENTS_ESCAPED=$(echo '${{ steps.get-events.outputs.EVENTS }}' | jq -Rs .)
+          if [ -z "$ACCESS_TOKEN" ]; then
+            echo "❌ Failed to get access token"
+            exit 1
+          fi
           
-          # Create JSON payload for Gemini API
+          echo "Building prompt for Gemini..."
+          
+          # Build comprehensive context
+          LOGS="${{ steps.get-logs.outputs.LOGS }}"
+          EVENTS="${{ steps.get-events.outputs.EVENTS }}"
+          DESCRIPTION="${{ steps.get-description.outputs.DESCRIPTION }}"
+          
+          # Create the prompt
+          PROMPT_TEXT="You are an expert MLOps Site Reliability Engineer analyzing a production alert.
+
+          **Alert Details:**
+          - Alert: ${{ inputs.alert_name }}
+          - Severity: ${{ inputs.alert_severity }}
+          - Pod: ${{ inputs.pod_name }}
+          - Namespace: ${{ inputs.namespace }}
+          - Cluster: ${{ inputs.cluster }}
+
+          **Pod Logs (last 100 lines):**
+          \`\`\`
+          ${LOGS}
+          \`\`\`
+
+          **Kubernetes Events:**
+          \`\`\`
+          ${EVENTS}
+          \`\`\`
+
+          **Pod Description:**
+          \`\`\`
+          ${DESCRIPTION}
+          \`\`\`
+
+          **Your Task:**
+          Analyze this production alert and provide:
+
+          1. **Root Cause** - What likely caused this alert? (3 most probable causes)
+          2. **Impact Assessment** - What's affected?
+          3. **Immediate Actions** - What should the on-call engineer do RIGHT NOW?
+          4. **Prevention** - How to prevent this in the future?
+
+          If the pod doesn't exist anymore, explain what that means and how to investigate historical issues.
+
+          Format as markdown. Be specific and actionable. Keep under 500 words."
+          
+          # Create JSON payload
           cat > gemini-request.json << EOF
           {
             "contents": [{
               "role": "user",
               "parts": [{
-                "text": "You are an expert MLOps Site Reliability Engineer analyzing a production alert for a machine learning model serving system.\n\n**Alert Details:**\n- Alert Name: ${{ inputs.alert_name }}\n- Severity: ${{ inputs.alert_severity }}\n- Pod: ${{ inputs.pod_name }}\n- Namespace: ${{ inputs.namespace }}\n\n**Pod Logs (last 100 lines):**\n${LOGS_ESCAPED}\n\n**Kubernetes Events:**\n${EVENTS_ESCAPED}\n\n**Your Task:**\nProvide a concise markdown analysis with:\n1. **Root Cause Hypothesis** (3 most likely causes, ranked by probability)\n2. **Impact Assessment** (What systems/users are affected?)\n3. **Immediate Actions** (What should the on-call engineer do RIGHT NOW?)\n4. **Prevention Recommendations** (How to prevent this in the future?)\n\nFormat your response as markdown. Be specific and actionable. Focus on ML-specific issues (model loading, inference errors, resource constraints)."
+                "text": $(echo "$PROMPT_TEXT" | jq -Rs .)
               }]
             }],
             "generationConfig": {
@@ -100,17 +208,33 @@ jobs:
           }
           EOF
           
-          # Call Gemini API using REST endpoint
-          ANALYSIS=$(curl -s -X POST \
+          echo "Calling Gemini API..."
+          RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer ${ACCESS_TOKEN}" \
             -H "Content-Type: application/json" \
             "https://us-central1-aiplatform.googleapis.com/v1/projects/${{ secrets.GCP_PROJECT_ID }}/locations/us-central1/publishers/google/models/gemini-2.5-flash-lite:generateContent" \
-            -d @gemini-request.json | jq -r '.candidates[0].content.parts[0].text // "❌ Gemini API call failed. Check service account permissions."')
+            -d @gemini-request.json)
+          
+          echo "Gemini API Response:"
+          echo "$RESPONSE" | jq .
+          
+          # Extract analysis from response
+          ANALYSIS=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text // "❌ Failed to extract analysis from Gemini response"')
+          
+          if [[ "$ANALYSIS" == *"Failed to extract"* ]]; then
+            echo "Full response for debugging:"
+            echo "$RESPONSE"
+            
+            # Check for error in response
+            ERROR_MSG=$(echo "$RESPONSE" | jq -r '.error.message // "Unknown error"')
+            if [[ "$ERROR_MSG" != "Unknown error" ]]; then
+              ANALYSIS="❌ Gemini API Error: ${ERROR_MSG}\n\nPlease check:\n1. Service account has 'AI Platform User' role\n2. Vertex AI API is enabled\n3. Project ID is correct"
+            fi
+          fi
           
           # Save analysis
           echo "$ANALYSIS" > analysis-report.md
           
-          # Set output for next step
           echo "ANALYSIS<<EOF" >> $GITHUB_OUTPUT
           echo "$ANALYSIS" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
@@ -125,10 +249,10 @@ jobs:
           ALERT_SEVERITY: ${{ inputs.alert_severity }}
           POD_NAME: ${{ inputs.pod_name }}
           NAMESPACE: ${{ inputs.namespace }}
+          CLUSTER: ${{ inputs.cluster }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Read from environment variables to avoid template literal issues
             const analysis = process.env.ANALYSIS_CONTENT;
             const logs = process.env.LOGS_CONTENT;
             const events = process.env.EVENTS_CONTENT;
@@ -136,6 +260,7 @@ jobs:
             const severity = process.env.ALERT_SEVERITY;
             const podName = process.env.POD_NAME;
             const namespace = process.env.NAMESPACE;
+            const cluster = process.env.CLUSTER;
             
             const issueBody = [
               `## 🚨 Production Alert: ${alertName}`,
@@ -143,6 +268,7 @@ jobs:
               `**Severity:** ${severity}`,
               `**Pod:** \`${podName}\``,
               `**Namespace:** \`${namespace}\``,
+              `**Cluster:** \`${cluster}\``,
               `**Timestamp:** ${new Date().toISOString()}`,
               '',
               '---',
@@ -182,9 +308,9 @@ jobs:
             await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `[ALERT] ${alertName} - ${podName}`,
+              title: `[ALERT] ${alertName} - ${podName} (${cluster})`,
               body: issueBody,
-              labels: ['production-alert', 'ai-analysis', severity]
+              labels: ['production-alert', 'ai-analysis', severity, `cluster-${cluster}`]
             });
 
       - name: Upload artifacts
@@ -196,3 +322,4 @@ jobs:
             pod-logs.txt
             pod-events.txt
             analysis-report.md
+            gemini-request.json
