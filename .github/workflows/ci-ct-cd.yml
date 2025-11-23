@@ -81,7 +81,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest pytest-cov
-          pip install -r requirements.txt
+          pip install -r models/xgboost_wine_quality/requirements.txt
 
       - name: Run unit tests
         env:
@@ -118,14 +118,14 @@ jobs:
         env:
           MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
         run: |
-          python train.py
+          python models/xgboost_wine_quality/train.py
           echo "MODEL_TRAINED=true" >> $GITHUB_ENV
 
       - name: Upload model artifact
         uses: actions/upload-artifact@v4
         with:
           name: trained-model
-          path: model.pkl
+          path: models/xgboost_wine_quality/model.pkl
 
   # Stage 5: Build & Scan Container Image
   build-and-scan:
@@ -201,7 +201,7 @@ jobs:
     - name: Checkout infra repo
       uses: actions/checkout@v4
       with:
-        repository: Dycouzt/MLOps-AI-Homelab-Infra-Manifests
+        repository: Dycouzt/MLOps-AI-Platform-Infra-Manifests
         token: ${{ secrets.INFRA_REPO_PAT }}
         path: infra-repo
 
