@@ -18,6 +18,21 @@ MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MODEL_NAME = "wine-quality-xgboost"
 MIN_ACCURACY_THRESHOLD = 0.65  # Wine quality is harder to predict
 
+
+# --- MLflow Setup ---------------------------------------------------------
+if os.getenv("GITHUB_ACTIONS"):
+    # Local artifact store on GitHub runner (safe)
+    local_mlruns = os.path.abspath("mlruns")
+    os.makedirs(local_mlruns, exist_ok=True)
+    mlflow.set_tracking_uri(f"file://{local_mlruns}")
+    print(f"[INFO] Running inside GitHub Actions - using local MLflow store at {local_mlruns}")
+else:
+    # Use remote MLflow server when running normally
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    print(f"[INFO] Using MLflow Tracking URI: {MLFLOW_TRACKING_URI}")
+# --------------------------------------------------------------------------
+
+
 def load_wine_data():
     """Load Wine Quality dataset from sklearn"""
     from sklearn.datasets import load_wine
@@ -46,7 +61,6 @@ def train_model():
     X_test_scaled = scaler.transform(X_test)
     
     # Set MLflow tracking
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment("wine-quality-classification")
     
     with mlflow.start_run():
