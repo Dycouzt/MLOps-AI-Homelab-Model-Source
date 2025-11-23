@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install dependencies system-wide (not --user)
-COPY requirements.txt .
+COPY models/xgboost_wine_quality/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Final stage
@@ -22,8 +22,8 @@ WORKDIR /app
 COPY --from=builder /usr/local /usr/local
 
 # Copy application code
-COPY app.py .
-COPY model.pkl .
+COPY models/xgboost_wine_quality/app.py .
+COPY models/xgboost_wine_quality/model.pkl .
 
 # Create non-root user and set ownership
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
