@@ -1,5 +1,3 @@
-# Copy this content into tests/test_model.py:
-
 """
 test_model.py - Unit tests for the ML model and inference server
 """

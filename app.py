@@ -1,5 +1,3 @@
-# Copy this content into app.py:
-
 """
 app.py - Flask inference server for the Iris classifier
 Exposes REST API endpoints for model predictions and health checks

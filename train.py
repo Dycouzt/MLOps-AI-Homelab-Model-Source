@@ -13,9 +13,6 @@ MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
 MODEL_NAME = "iris-classifier"
 MIN_ACCURACY_THRESHOLD = 0.85  # Pipeline fails if accuracy < 85%
 
-# -------------------------------------------------------------------------
-# ADD THIS BLOCK (before any mlflow.set_tracking_uri() call)
-# -------------------------------------------------------------------------
 # If running inside GitHub Actions, use a local artifact store to avoid
 # "Permission denied: '/mlflow'" errors on CI runners.
 if os.getenv("GITHUB_ACTIONS"):
