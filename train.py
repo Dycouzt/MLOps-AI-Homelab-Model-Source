@@ -22,6 +22,13 @@ if os.getenv("GITHUB_ACTIONS"):
     local_mlruns = os.path.abspath("mlruns")
     os.makedirs(local_mlruns, exist_ok=True)
     mlflow.set_tracking_uri(f"file://{local_mlruns}")
+    print(f"MLflow Tracking URI: {MLFLOW_TRACKING_URI}")
+    print("Testing MLflow connection...")
+    try:
+        mlflow.search_experiments()
+        print("✅ MLflow connection successful")
+    except Exception as e:
+        print(f"❌ MLflow connection failed: {e}")
 else:
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 # -------------------------------------------------------------------------
