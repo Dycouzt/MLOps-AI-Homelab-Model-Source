@@ -128,9 +128,14 @@ def train_model():
         )
         
         # Save model and scaler locally
-        with open("model.pkl", 'wb') as f:
+        # Use absolute path relative to this script to ensure they are saved in the correct directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        model_path = os.path.join(script_dir, "model.pkl")
+        scaler_path = os.path.join(script_dir, "scaler.pkl")
+        
+        with open(model_path, 'wb') as f:
             pickle.dump(model, f)
-        with open("scaler.pkl", 'wb') as f:
+        with open(scaler_path, 'wb') as f:
             pickle.dump(scaler, f)
         
         print(f"Model and scaler saved locally")
